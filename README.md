@@ -2,6 +2,16 @@
 
 Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具调用和结构化影响报告。默认演示使用合成的 Confluence 页面、两个 Python 仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
 
+## 三个 Agent 和提示词
+
+| Agent | 实现 | 模型提示词 |
+| --- | --- | --- |
+| Main Process Impact Analyser | [`dhub/agents/main.py`](dhub/agents/main.py) | [需求规划](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md) |
+| Domain Knowledge Investigator | [`dhub/agents/domain.py`](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) |
+| Code Investigator | [`dhub/agents/code.py`](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) |
+
+[LangGraph 入口](dhub/analyzer.py)把三个角色接到需求规划、业务调查、代码调查和报告生成节点。两个 Investigator 在各自文件里声明可调用的工具。模型模式把[共用指令与决策基线](dhub/prompts/common.md)和角色提示词组合后发送给网关。默认离线模式使用内置演示场景。
+
 ## 快速启动
 
 在项目根目录打开 PowerShell。需要 Python 3.11 或更新版本，内网项目模式还需要 Git 在 `PATH` 上。浏览器直接访问 FastAPI 托管的页面，前端资源均随项目提供。

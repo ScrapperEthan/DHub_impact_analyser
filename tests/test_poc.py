@@ -15,6 +15,9 @@ from dhub.app import create_app
 from dhub.config import LLMConfig, Settings
 
 
+PROMPT_DIR = Path(__file__).resolve().parent.parent / "dhub" / "prompts"
+
+
 class ChatGateway(HTTPServer):
     def __init__(self):
         super().__init__(("127.0.0.1", 0), ChatHandler)
@@ -36,9 +39,16 @@ class ChatGateway(HTTPServer):
         if tools:
             assert payload["tool_choice"] == "auto"
             if "read_document" in tools:
+                self.assert_system_prompt(messages, "domain.md")
+                assert set(tools) == {"search_documents", "list_documents", "read_document", "get_document_metadata"}
                 name = "read_document"
                 arguments = {"page_id": "DEMO-FD2", "version": "1", "section": "Phase 5 / Step 18"}
             else:
+                self.assert_system_prompt(messages, "code.md")
+                assert set(tools) == {
+                    "get_repository_metadata", "search_code", "read_file", "codegraph_explore", "codegraph_read_result",
+                }
+                assert user_data["domain_findings"][0]["evidence_ids"] == [self.evidence_ids["read_document"]]
                 name = "read_file"
                 arguments = {"repo_id": "fixture-decision", "path": "decision/frequency.py"}
             assert arguments.keys() <= tools[name]["parameters"]["properties"].keys()
@@ -66,9 +76,11 @@ class ChatGateway(HTTPServer):
             return self._json_message({"coverage": ["已读原文"], "evidence_ids": [evidence_id]})
 
         if "evidence" not in user_data:
+            self.assert_system_prompt(messages, "main-plan.md")
             self.calls.append("plan")
             return self._json_message({"goal": DEMO_REQUIREMENT, "scope": ["Outbound"]})
 
+        self.assert_system_prompt(messages, "main-report.md")
         self.calls.append("report")
         available_ids = [row["evidence_id"] for row in user_data["evidence"]]
         assert available_ids == list(self.evidence_ids.values())
@@ -91,6 +103,21 @@ class ChatGateway(HTTPServer):
                 }],
             },
         })
+
+    @staticmethod
+    def assert_system_prompt(messages, name):
+        assert messages[0]["role"] == "system"
+        expected = "\n\n".join(
+            (PROMPT_DIR / filename).read_text(encoding="utf-8").strip()
+            for filename in ("common.md", name)
+        )
+        actual = messages[0]["content"]
+        if name == "main-report.md":
+            prompt, separator, schema = actual.partition("\n\nReport JSON Schema:\n")
+            assert prompt == expected and separator
+            assert "impact_items" in json.loads(schema)["properties"]
+        else:
+            assert actual == expected, name
 
     @staticmethod
     def _json_message(content):
