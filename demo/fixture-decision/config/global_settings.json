@@ -1,0 +1,11 @@
+{
+  "frequency_cap": {
+    "maximum_contacts": 3,
+    "allow_mandate_campaign_override": true
+  },
+  "quiet_time": {
+    "enabled": true,
+    "start_hour": 22,
+    "end_hour": 8
+  }
+}

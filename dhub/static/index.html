@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DHub Process Impact Analyser</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="site-header">
+    <div class="shell">
+      <h1>DHub Process Impact Analyser</h1>
+    </div>
+  </header>
+
+  <main class="shell workspace">
+    <form id="requirement-form" class="panel request-panel">
+      <div class="heading-row">
+        <label class="section-title" for="requirement">变更需求</label>
+        <button type="button" class="button subtle" id="fill-example">填入示例</button>
+      </div>
+      <textarea id="requirement" name="requirement" rows="4" placeholder="描述拟议变更、适用渠道和期望行为" required></textarea>
+      <div class="form-footer">
+        <button class="button primary" id="submit" type="submit">开始分析</button>
+        <div class="run-meta" aria-live="polite">
+          <span id="run-status" class="tag" hidden></span>
+          <span id="data-mode" class="tag" hidden></span>
+          <span id="run-id" class="run-id"></span>
+        </div>
+      </div>
+      <p id="notice" class="notice" role="status" hidden></p>
+    </form>
+
+    <div class="poc-results">
+      <section class="panel report-panel" aria-labelledby="report-title">
+        <div class="panel-header">
+          <h2 id="report-title">影响报告</h2>
+        </div>
+        <div id="report" class="panel-body">
+          <p class="muted empty-state">提交一条变更需求后，这里会显示影响、依据和回归建议。</p>
+        </div>
+      </section>
+
+      <section class="panel trace-panel" aria-labelledby="trace-title">
+        <div class="panel-header">
+          <div class="heading-row">
+            <h2 id="trace-title">调查 Trace</h2>
+            <span class="muted trace-count" id="trace-count">0 次工具调用</span>
+          </div>
+          <div class="role-key" aria-label="调查角色">
+            <span class="role-main">主 Agent</span>
+            <span class="role-domain">业务调查</span>
+            <span class="role-code">代码调查</span>
+          </div>
+        </div>
+        <div id="trace" class="panel-body trace-list" aria-label="工具调用时间线">
+          <p id="trace-empty" class="muted empty-state">开始调查后可以在这里查看工具调用。</p>
+        </div>
+      </section>
+    </div>
+  </main>
+</body>
+</html>

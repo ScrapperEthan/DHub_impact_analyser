@@ -1,0 +1,44 @@
+{
+  "documents": [
+    {
+      "page_id": "DEMO-FD2",
+      "version": "1",
+      "title": "Decisioning Process（演示）",
+      "feature_drop": "FD2",
+      "ancestors": [
+        "DecisionHub Demo",
+        "FD2 Requirements"
+      ],
+      "keywords": [
+        "frequency cap",
+        "频控",
+        "频率上限",
+        "强制营销活动"
+      ],
+      "links": [
+        {
+          "page_id": "DEMO-SETTINGS",
+          "version": "1"
+        }
+      ],
+      "path": "documents/decisioning-process.md"
+    },
+    {
+      "page_id": "DEMO-SETTINGS",
+      "version": "1",
+      "title": "Global Settings（演示）",
+      "feature_drop": "FD2",
+      "ancestors": [
+        "DecisionHub Demo",
+        "FD2 Requirements"
+      ],
+      "keywords": [
+        "配置",
+        "frequency cap",
+        "quiet time",
+        "全局设置"
+      ],
+      "path": "documents/global-settings.md"
+    }
+  ]
+}

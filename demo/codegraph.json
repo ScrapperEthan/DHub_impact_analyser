@@ -1,0 +1,48 @@
+{
+  "fixture-decision": [
+    {
+      "caller": "decision.inbound.select_inbound",
+      "callee": "decision.frequency.should_allow_campaign",
+      "path": "decision/inbound.py",
+      "line": 8,
+      "relation": "calls"
+    },
+    {
+      "caller": "decision.outbound.select_outbound",
+      "callee": "decision.frequency.should_allow_campaign",
+      "path": "decision/outbound.py",
+      "line": 8,
+      "relation": "calls"
+    },
+    {
+      "caller": "tests.test_frequency.FrequencyCapTests.test_shared_default_bypass_for_mandatory_when_over_cap",
+      "callee": "decision.frequency.should_allow_campaign",
+      "path": "tests/test_frequency.py",
+      "line": 12,
+      "relation": "calls"
+    },
+    {
+      "caller": "tests.test_frequency.FrequencyCapTests.test_outbound_and_inbound_currently_share_bypass",
+      "callee": "decision.outbound.select_outbound",
+      "path": "tests/test_frequency.py",
+      "line": 17,
+      "relation": "calls"
+    },
+    {
+      "caller": "tests.test_frequency.FrequencyCapTests.test_outbound_and_inbound_currently_share_bypass",
+      "callee": "decision.inbound.select_inbound",
+      "path": "tests/test_frequency.py",
+      "line": 18,
+      "relation": "calls"
+    }
+  ],
+  "fixture-channel": [
+    {
+      "caller": "channel.delivery.prepare_delivery_requests",
+      "callee": "channel.delivery.delivery_candidates",
+      "path": "channel/delivery.py",
+      "line": 7,
+      "relation": "calls"
+    }
+  ]
+}
