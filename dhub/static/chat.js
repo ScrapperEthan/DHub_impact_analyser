@@ -1,4 +1,4 @@
-"use strict";
+import { renderChatReply } from "./chat-render/markdown.js";
 
 const HISTORY_KEY = "dhub.chat.history.v1";
 const MAX_CONTEXT_TURNS = 12;
@@ -34,9 +34,12 @@ function saveTurns() {
 
 function appendMessage(role, text) {
   const message = element("article", `chat-message chat-message-${role}`);
+  const content = role === "assistant"
+    ? renderChatReply(text, updateReplyLayout)
+    : element("p", "chat-text", text);
   message.append(
     element("p", "chat-speaker", role === "user" ? "You" : "DHub Agent"),
-    element("p", "chat-text", text),
+    content,
   );
   transcript.append(message);
   return message;
@@ -82,6 +85,12 @@ function scrollToLatest() {
 
 function isNearLatest() {
   return scrollArea.scrollHeight - scrollArea.scrollTop - scrollArea.clientHeight < 48;
+}
+
+function updateReplyLayout(update) {
+  const follow = isNearLatest();
+  update();
+  if (follow) scrollToLatest();
 }
 
 form.addEventListener("submit", async event => {
