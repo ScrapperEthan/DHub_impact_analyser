@@ -10,7 +10,7 @@ FastAPI 接收需求并运行 LangGraph。建议单进程后台执行分析，�
 | `GET /api/runs/{run_id}` | 返回 `run_id`、`status`、`data_mode`、`source_snapshot`、`report` 和可读的 `error`（如有）。报告生成前 `report` 为 `null` |
 | `GET /api/runs/{run_id}/events?after_seq=0` | 返回序号大于 `after_seq` 的事件，按 `seq` 递增。响应包含 `events` 和 `next_after_seq`，空列表沿用游标。可以用固定页长分批读取 |
 
-未知运行返回 `404`。`source_snapshot` 包含知识快照 ID、导入覆盖范围和两个 Repo 的标识、分支、提交及可用性。缺失字段反映为未知或不可用。仓库在 detached HEAD 时分支可以为空，commit SHA 仍用于定位。
+未知运行返回 `404`。`source_snapshot` 包含知识快照 ID、导入覆盖范围和仓库列表，每条记录含仓库标识、分支、提交及可用性。缺失字段反映为未知或不可用。仓库在 detached HEAD 时分支可以为空，commit SHA 仍用于定位。
 
 | 运行状态 | 含义 |
 | --- | --- |

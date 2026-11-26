@@ -1,6 +1,6 @@
 # DHub Process Impact Analyser V0
 
-Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具调用和结构化影响报告。默认演示使用合成的 Confluence 页面、两个 Python 仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
+Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具调用和结构化影响报告。默认演示使用合成的 Confluence 页面、两个示例仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
 
 ## 三个 Agent 和提示词
 
@@ -69,18 +69,19 @@ def pull_pages(*, space_key: str, root_page_ids: list[str]) -> Iterable[Confluen
 
 每页提供 `page_id`、`version`、`title`、`markdown`，有条件时带上 `ancestors`、`feature_drop`、`source_url`、更新时间、页面链接和附件元数据。转换时保留标题、表格和条件分支。导出器写 Markdown 与 `manifest.json`。将 `DHUB_CONFLUENCE_MANIFEST` 指向该文件。已有本地导出可按 [演示清单结构](demo/manifest.json) 直接接入，`path` 相对于清单目录。附件当前以元数据线索呈现，可检索正文需要在导出阶段转换为 Markdown。
 
-### 接入两个 Python 仓库
+### 接入项目仓库
 
-在内网准备两个本地 Git checkout。创建 `data/repositories.json`，按实际路径和用于验证的版本填写。相对路径按该 JSON 所在目录解析。
+在内网准备项目仓库的本地 Git checkout。创建 `data/repositories.json`，按实际路径和用于验证的版本填写。相对路径按该 JSON 所在目录解析。
 
 ```json
 [
-  {"repo_id": "decision", "path": "D:/dhub/decision-checkout", "ref": "main"},
-  {"repo_id": "channel", "path": "D:/dhub/channel-checkout", "ref": "main"}
+  {"repo_id": "dhub", "path": "D:/dhub/project-checkout", "ref": "main"}
 ]
 ```
 
 将 `DHUB_REPOS_FILE` 指向配置文件。`ref` 可以是 branch、tag 或 commit，未填时为 `HEAD`。每次分析开始时解析固定提交，然后从版本对象只读搜索与读取，不需要 checkout 其他分支。
+
+项目仓库的语言构成为 94% Python、4% Shell、2% PowerShell。当前单仓库配置可用于联调，PoC 会将成功产出报告的运行标为 `partial`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
 
 CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入。工厂返回满足 [CodeGraphAdapter](dhub/sources.py) 的对象，接入内网版本的索引查询。`indexed_commit(repo_id)` 返回索引覆盖的提交，`explore(repo_id=..., commit_sha=..., query=...)` 返回可序列化的关系记录数组。后端验证索引与本次提交匹配并提供窗口读取。缺少匹配索引时可以用搜索和带行号的文件阅读继续核实，并在报告中说明覆盖缺口。
 
@@ -98,4 +99,4 @@ CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入�
 - `DHUB_DB_PATH` 默认是 `.local/runs.sqlite3`。其中保存需求、证据摘要、报告和 Trace。转交内网时复制 `dhub/`、`demo/`、`docs/`、`tests/`、`requirements.txt`、`README.md` 和 `.env.example`。虚拟环境、实际导出、凭证和运行库在目标环境准备。
 - 停止服务用 `Ctrl+C`。将要独立验证的历史请求放入不同数据库文件，便于区分演示和项目运行。
 
-[总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)
+[文档索引与路线图](docs/README.md) · [总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)

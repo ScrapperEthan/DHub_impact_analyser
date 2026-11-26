@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="453" viewBox="0 0 560 453" role="img" aria-labelledby="title desc">
+  <title id="title">V1 候选 Hybrid RAG 检索流程</title>
+  <desc id="desc">根据查询和范围并行召回关键词和向量候选。融合并补齐父级上下文，然后读取版本化原文获得证据。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; text-anchor: middle; fill: #152C41; }
+    .label { font-size: 23px; font-weight: 700; }
+    .detail { font-size: 17px; fill: #37536C; }
+    .tool { font-family: Consolas, "SFMono-Regular", monospace; font-size: 17px; fill: #234760; }
+    .terminal .label { fill: #FFFFFF; }
+    .terminal .detail { fill: #D5E7F6; }
+    .node rect { stroke-width: 1.5; }
+    .source rect { fill: #FFFFFF; stroke: #9BAFC2; }
+    .domain rect { fill: #E6F5F0; stroke: #43967E; }
+  </style>
+
+  <rect x="1" y="1" width="558" height="451" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
+
+  <g fill="none" stroke="#526A82" stroke-width="2.5" stroke-linejoin="round">
+    <path d="M280 80V95"/>
+    <path d="M280 95H152Q144 95 144 103V112" marker-end="url(#arrow)"/>
+    <path d="M280 95H408Q416 95 416 103V112" marker-end="url(#arrow)"/>
+    <path d="M144 174V186Q144 194 152 194H408Q416 194 416 186V174"/>
+    <path d="M280 194V215" marker-end="url(#arrow)"/>
+    <path d="M280 273V292" marker-end="url(#arrow)"/>
+    <path d="M280 350V369" marker-end="url(#arrow)"/>
+  </g>
+
+  <g class="node terminal">
+    <rect x="117" y="22" width="326" height="58" rx="13" fill="#16344D"/>
+    <text class="label" x="280" y="50">业务查询与范围</text>
+    <text class="detail" x="280" y="69">术语 / FD / 层级 / 版本</text>
+  </g>
+  <g class="node domain">
+    <rect x="24" y="112" width="240" height="62" rx="13"/>
+    <text class="label" x="144" y="139">关键词召回</text>
+    <text class="detail" x="144" y="162">BM25 / FTS</text>
+  </g>
+  <g class="node domain">
+    <rect x="296" y="112" width="240" height="62" rx="13"/>
+    <text class="label" x="416" y="139">向量召回</text>
+    <text class="detail" x="416" y="162">章节 embedding</text>
+  </g>
+  <g class="node source">
+    <rect x="117" y="215" width="326" height="58" rx="13"/>
+    <text class="label" x="280" y="243">融合候选</text>
+    <text class="detail" x="280" y="262">按需重排</text>
+  </g>
+  <g class="node source">
+    <rect x="117" y="292" width="326" height="58" rx="13"/>
+    <text class="label" x="280" y="320">补齐父级上下文</text>
+    <text class="detail" x="280" y="339">父章节或页面</text>
+  </g>
+  <g class="node domain">
+    <rect x="117" y="369" width="326" height="60" rx="13"/>
+    <text class="label" x="280" y="395">读取原文并引用</text>
+    <text class="tool" x="280" y="417">read_document</text>
+  </g>
+</svg>

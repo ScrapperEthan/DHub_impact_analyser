@@ -1,0 +1,98 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="809" viewBox="0 0 560 809" role="img" aria-labelledby="title desc">
+  <title id="title">目标调查流程</title>
+  <desc id="desc">先调查业务规则，再由 Main 细化代码任务。Main 综合双方发现，必要时定向补查一次，然后交付影响报告。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
+    </marker>
+    <marker id="amber-arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#A15C11"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; text-anchor: middle; fill: #152C41; }
+    .label { font-size: 24px; font-weight: 700; }
+    .detail { font-size: 17px; fill: #37536C; }
+    .terminal .label { fill: #FFFFFF; }
+    .terminal .detail { fill: #D5E7F6; }
+    .node rect { stroke-width: 1.5; }
+    .main rect { fill: #EAF2FF; stroke: #6393CB; }
+    .domain rect { fill: #E6F5F0; stroke: #43967E; }
+    .code rect { fill: #F1EDFC; stroke: #8B74BC; }
+    .branch { font-size: 17px; font-weight: 700; }
+    .amber { fill: #79440D; }
+  </style>
+
+  <rect x="1" y="1" width="558" height="807" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
+
+  <g fill="none" stroke="#526A82" stroke-width="2.5" marker-end="url(#arrow)">
+    <path d="M178 78V97"/>
+    <path d="M178 161V180"/>
+    <path d="M178 244V263"/>
+    <path d="M178 327V346"/>
+    <path d="M178 410V429"/>
+    <path d="M178 493V512"/>
+    <path d="M178 576V595"/>
+    <path d="M178 695V721"/>
+  </g>
+  <g fill="none" stroke="#A15C11" stroke-width="2.5" marker-end="url(#amber-arrow)">
+    <path d="M332 645H368"/>
+    <path d="M452 608V552Q452 544 444 544H332" stroke-dasharray="6 5"/>
+  </g>
+
+  <g class="node terminal">
+    <rect x="24" y="22" width="308" height="56" rx="13" fill="#16344D"/>
+    <text class="label" x="178" y="50">提交变更需求</text>
+    <text class="detail" x="178" y="68">Business / Developer</text>
+  </g>
+  <g class="node">
+    <rect x="24" y="97" width="308" height="64" rx="13" fill="#FFFFFF" stroke="#9BAFC2"/>
+    <text class="label" x="178" y="124">固定资料快照</text>
+    <text class="detail" x="178" y="147">Confluence 页版本与 Git 提交</text>
+  </g>
+  <g class="node main">
+    <rect x="24" y="180" width="308" height="64" rx="13"/>
+    <text class="label" x="178" y="207">规划需求与业务任务</text>
+    <text class="detail" x="178" y="230">Main 明确目标、范围和假设</text>
+  </g>
+  <g class="node domain">
+    <rect x="24" y="263" width="308" height="64" rx="13"/>
+    <text class="label" x="178" y="290">查业务规则</text>
+    <text class="detail" x="178" y="313">Domain 输出规则、例外与代码线索</text>
+  </g>
+  <g class="node main">
+    <rect x="24" y="346" width="308" height="64" rx="13"/>
+    <text class="label" x="178" y="373">细化代码任务</text>
+    <text class="detail" x="178" y="396">Main 把业务发现转成待验证问题</text>
+  </g>
+  <g class="node code">
+    <rect x="24" y="429" width="308" height="64" rx="13"/>
+    <text class="label" x="178" y="456">查代码实现</text>
+    <text class="detail" x="178" y="479">Code 核对调用、配置与测试</text>
+  </g>
+  <g class="node main">
+    <rect x="24" y="512" width="308" height="64" rx="13"/>
+    <text class="label" x="178" y="539">综合跨层影响</text>
+    <text class="detail" x="178" y="562">Main 关联两侧证据并判断影响</text>
+  </g>
+  <g class="node">
+    <path d="M178 595 332 645 178 695 24 645Z" fill="#FFF3DD" stroke="#BC7C2B" stroke-width="1.5"/>
+    <text class="amber" x="178" y="642" font-size="22" font-weight="700">关键证据缺口</text>
+    <text class="amber" x="178" y="668" font-size="21" font-weight="700">且可补查？</text>
+  </g>
+  <text class="branch amber" x="350" y="635">是</text>
+  <text class="branch" x="200" y="714">否</text>
+  <text class="branch amber" x="427" y="532">追加发现</text>
+
+  <g class="node">
+    <rect x="368" y="608" width="168" height="88" rx="13" fill="#FFF3DD" stroke="#BC7C2B"/>
+    <text class="label amber" x="452" y="637">定向补查</text>
+    <text class="detail amber" x="452" y="660">业务 → Domain</text>
+    <text class="detail amber" x="452" y="683">实现 → Code</text>
+  </g>
+  <g class="node terminal">
+    <rect x="24" y="721" width="308" height="64" rx="13" fill="#16344D"/>
+    <text class="label" x="178" y="748">交付影响报告</text>
+    <text class="detail" x="178" y="772">影响范围、证据、回归场景</text>
+  </g>
+</svg>

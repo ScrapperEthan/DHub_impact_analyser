@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="421" viewBox="0 0 560 421" role="img" aria-labelledby="title desc">
+  <title id="title">Confluence 知识快照与工具</title>
+  <desc id="desc">导出 Markdown 和 manifest 后按次加载。目录、搜索和元数据定位材料，读取文档原文生成证据。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; text-anchor: middle; fill: #152C41; }
+    .label { font-size: 23px; font-weight: 700; }
+    .detail { font-size: 17px; fill: #37536C; }
+    .tool { font-family: Consolas, "SFMono-Regular", monospace; font-size: 17px; fill: #234760; }
+    .terminal .label { fill: #FFFFFF; }
+    .terminal .detail { fill: #D5E7F6; }
+    .node rect { stroke-width: 1.5; }
+    .source rect { fill: #FFFFFF; stroke: #9BAFC2; }
+    .domain rect { fill: #E6F5F0; stroke: #43967E; }
+  </style>
+
+  <rect x="1" y="1" width="558" height="419" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
+
+  <g fill="none" stroke="#526A82" stroke-width="2.5" stroke-linejoin="round">
+    <path d="M280 80V99" marker-end="url(#arrow)"/>
+    <path d="M280 157V176" marker-end="url(#arrow)"/>
+    <path d="M280 234V256"/>
+    <path d="M280 256H158Q149 256 149 265V278" marker-end="url(#arrow)"/>
+    <path d="M280 256H405Q414 256 414 265V278" marker-end="url(#arrow)"/>
+  </g>
+
+  <g class="node terminal">
+    <rect x="117" y="22" width="326" height="58" rx="13" fill="#16344D"/>
+    <text class="label" x="280" y="50">Confluence 资料</text>
+    <text class="detail" x="280" y="69">授权导出 / MCP provider</text>
+  </g>
+  <g class="node source">
+    <rect x="117" y="99" width="326" height="58" rx="13"/>
+    <text class="label" x="280" y="127">Markdown + manifest</text>
+    <text class="detail" x="280" y="146">原文、页版本与元数据</text>
+  </g>
+  <g class="node domain">
+    <rect x="117" y="176" width="326" height="58" rx="13"/>
+    <text class="label" x="280" y="204">本次文档快照</text>
+    <text class="detail" x="280" y="223">目录、标题树、章节</text>
+  </g>
+
+  <g class="node source">
+    <rect x="24" y="278" width="250" height="119" rx="13"/>
+    <text class="label" x="149" y="307">发现线索</text>
+    <text class="tool" x="149" y="334">list_documents</text>
+    <text class="tool" x="149" y="358">search_documents</text>
+    <text class="tool" x="149" y="382">get_document_metadata</text>
+  </g>
+  <g class="node domain">
+    <rect x="293" y="278" width="243" height="119" rx="13"/>
+    <text class="label" x="414.5" y="307">取得证据</text>
+    <text class="tool" x="414.5" y="334">read_document</text>
+    <text class="detail" x="414.5" y="358">读取指定页版本的原文</text>
+    <text class="detail" x="414.5" y="382">登记 Evidence ID</text>
+  </g>
+</svg>

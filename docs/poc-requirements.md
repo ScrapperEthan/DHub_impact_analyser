@@ -19,13 +19,13 @@ Business 或 Developer 输入一条拟议变更，系统调查它会影响 DHub 
 | --- | --- | --- |
 | **Main Process Impact Analyser** | 新需求想改变什么？在业务规则、决策步骤和技术实现之间，哪些影响有证据，哪些需要验证？ | 向两个 Investigator 派发调查任务，向用户交付最终报告 |
 | **Domain Knowledge Investigator** | Confluence 在什么范围、什么版本中定义了哪些规则、例外和决策步骤？后续 Feature Drop 有无相关变更或不同表述？ | 向主 Agent 交付业务发现、原文证据、代码搜索线索和知识缺口 |
-| **Code Investigator** | 两个 Python 仓库的指定提交如何实现这些规则？涉及哪些调用方、共享逻辑、配置和现有测试？ | 向主 Agent 交付实现发现、代码证据、依赖关系和待验证项 |
+| **Code Investigator** | 项目仓库的指定提交如何实现这些规则？涉及哪些调用方、共享逻辑、配置和现有测试？ | 向主 Agent 交付实现发现、代码证据、依赖关系和待验证项 |
 
 主 Agent 持有精简的 Decision Process Baseline、系统概览和术语表。两位 Investigator 可以在同一次运行内多次搜索和阅读，主 Agent 根据证据缺口安排一轮定向补查。三位 Agent 可以随同一个后端进程运行，分别拥有任务、输出和 Trace 身份。[Agent 职责、工具和知识准备](agent-spec.md)
 
 ## DHub 资料与决策基线
 
-DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定推送结果的 Decision Process。可用资料是 Confluence 和两个 Python 仓库。Confluence 包含 FD1–FD5（Feature Drop 1–5）及 Core Component Documentation 等页面，项目已能通过 Confluence MCP 获取页面、版本、更新时间、更新人、Ancestors 和附件信息，并转换为 Markdown。仓库内可调查源码和存在的配置、接口契约及测试。两仓库的职责、提交和工具接入方式在项目联调时确认。
+DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定推送结果的 Decision Process。可用资料是 Confluence 和一个 Git 仓库，仓库语言构成为 94% Python、4% Shell、2% PowerShell。Confluence 包含 FD1–FD5（Feature Drop 1–5）及 Core Component Documentation 等页面，项目已能通过 Confluence MCP 获取页面、版本、更新时间、更新人、Ancestors 和附件信息，并转换为 Markdown。仓库内可调查源码和存在的配置、接口契约及测试。仓库提交、模块职责和工具覆盖在项目联调时确认。
 
 以下是从 FD2 Requirements 下的 **Decisioning Process** 页面起步的 Decision Process Baseline。步骤号沿用该页的 21 步编号，可作为初始导航。规则是否适用、代码是否实现以及部署状态，以各自来源和调查范围为准。
 
@@ -46,7 +46,7 @@ DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定�
 | --- | --- |
 | 提交和运行 | 提供一个网页和分析 API，接受一条变更需求，给出运行状态并显示结果 |
 | 调查业务 | 导入一组可用于样例的 Markdown 原文与元数据，按章节搜索和阅读，按 FD 或页面层级导航，找到规则、例外和依据 |
-| 调查代码 | 支持在两个配置仓库中只读搜索、带行号读文件、按可用的 CodeGraph 追踪调用关系，并记录仓库提交 |
+| 调查代码 | 支持在项目仓库中只读搜索、带行号读文件、按可用的 CodeGraph 追踪调用关系，并记录仓库提交 |
 | 综合影响 | 评估现有能力是否已支持需求，定位业务和流程影响，调查代码、配置及已有测试，提示规则冲突和可能的下游行为变化 |
 | 用证据交付 | 展示结构化报告、证据、覆盖范围、风险及回归建议。每条已确认影响能定位到本次运行读取的来源 |
 | 可见的工具调用 | 页面显示三个 Agent、每次真实工具调用的状态、参数摘要、结果摘要和用时。刷新同一运行能回看 Trace |
@@ -64,7 +64,7 @@ DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定�
 
 | 输入 | 用途 |
 | --- | --- |
-| 两个仓库的访问方式、职责、分支和可固定的提交 | 核实真实的模块分工和技术影响 |
+| 项目仓库的访问方式、分支、可固定的提交和模块职责 | 核实真实的模块分工和技术影响 |
 | Confluence MCP 导出方式及获准使用的页面范围 | 建立带页 ID、版本和 Section 的项目知识快照 |
 | MDC Assistant 四个代码工具的接口与 CodeGraph 索引信息 | 验证可复用能力和真实索引覆盖，确认分页契约 |
 | 模型端点与项目可使用的模型 | 在授权环境中执行实际工具调用分析 |

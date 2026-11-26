@@ -1,0 +1,66 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="468" viewBox="0 0 560 468" role="img" aria-labelledby="title desc">
+  <title id="title">Git 快照与 CodeGraph 调查路径</title>
+  <desc id="desc">将项目 Git 仓库绑定到一个提交。Git 搜索与读取可直接使用。CodeGraph 需要索引匹配提交，缺失或不匹配时回到 Git 工具。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
+    </marker>
+    <marker id="amber-arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#A15C11"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; text-anchor: middle; fill: #152C41; }
+    .label { font-size: 23px; font-weight: 700; }
+    .detail { font-size: 17px; fill: #37536C; }
+    .tool { font-family: Consolas, "SFMono-Regular", monospace; font-size: 16px; fill: #234760; }
+    .terminal .label { fill: #FFFFFF; }
+    .node rect { stroke-width: 1.5; }
+    .source rect { fill: #FFFFFF; stroke: #9BAFC2; }
+    .code rect { fill: #F1EDFC; stroke: #8B74BC; }
+    .branch { font-size: 17px; font-weight: 700; }
+    .amber { fill: #79440D; }
+  </style>
+
+  <rect x="1" y="1" width="558" height="466" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
+
+  <g fill="none" stroke="#526A82" stroke-width="2.5" stroke-linejoin="round">
+    <path d="M280 78V97" marker-end="url(#arrow)"/>
+    <path d="M280 157V175"/>
+    <path d="M280 175H156Q148 175 148 183V196" marker-end="url(#arrow)"/>
+    <path d="M280 175H404Q412 175 412 183V196" marker-end="url(#arrow)"/>
+    <path d="M412 280V354" marker-end="url(#arrow)"/>
+  </g>
+  <path d="M320 280V307Q320 315 312 315H156Q148 315 148 307V280"
+        fill="none" stroke="#A15C11" stroke-width="2.5" stroke-dasharray="6 5" marker-end="url(#amber-arrow)"/>
+
+  <g class="node terminal">
+    <rect x="117" y="22" width="326" height="56" rx="13" fill="#16344D"/>
+    <text class="label" x="280" y="58">配置项目 Git 仓库</text>
+  </g>
+  <g class="node source">
+    <rect x="117" y="97" width="326" height="60" rx="13"/>
+    <text class="label" x="280" y="123">固定调查提交</text>
+    <text class="detail" x="280" y="146">记录本次调查的 commit SHA</text>
+  </g>
+  <g class="node source">
+    <rect x="24" y="196" width="248" height="84" rx="13"/>
+    <text class="label" x="148" y="222">Git 搜索与原文</text>
+    <text class="tool" x="148" y="246">get_repository_metadata</text>
+    <text class="tool" x="148" y="268">search_code · read_file</text>
+  </g>
+  <g class="node code">
+    <rect x="288" y="196" width="248" height="84" rx="13"/>
+    <text class="label" x="412" y="229">校验 CodeGraph</text>
+    <text class="detail" x="412" y="255">索引提交与调查提交一致？</text>
+  </g>
+  <text class="branch amber" x="234" y="340">缺失或不匹配</text>
+  <text class="branch" x="445" y="322">匹配</text>
+
+  <g class="node code">
+    <rect x="288" y="354" width="248" height="90" rx="13"/>
+    <text class="label" x="412" y="381">查图与翻页</text>
+    <text class="tool" x="412" y="406">codegraph_explore</text>
+    <text class="tool" x="412" y="430">codegraph_read_result</text>
+  </g>
+</svg>

@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="480" viewBox="0 0 560 480" role="img" aria-labelledby="title desc">
+  <title id="title">需求到技术影响的证据关系</title>
+  <desc id="desc">从拟议变更查到规则原文、决策步骤和代码实现。代码调查再核对调用关系、配置、测试和下游行为。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; text-anchor: middle; fill: #152C41; }
+    .label { font-size: 23px; font-weight: 700; }
+    .detail { font-size: 17px; fill: #37536C; }
+    .terminal .label { fill: #FFFFFF; }
+    .node rect { stroke-width: 1.5; }
+    .domain rect { fill: #E6F5F0; stroke: #43967E; }
+    .code rect { fill: #F1EDFC; stroke: #8B74BC; }
+    .tech rect { fill: #FFFFFF; stroke: #9BAFC2; }
+  </style>
+
+  <rect x="1" y="1" width="558" height="478" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
+
+  <g fill="none" stroke="#526A82" stroke-width="2.5" stroke-linejoin="round" marker-end="url(#arrow)">
+    <path d="M280 68V87"/>
+    <path d="M280 144V162"/>
+    <path d="M280 216V234"/>
+    <path d="M404 116H437Q446 116 446 125V254Q446 263 437 263H404"/>
+    <path d="M280 292V333"/>
+    <path d="M280 311H111Q103 311 103 319V333"/>
+    <path d="M280 311H449Q457 311 457 319V333"/>
+    <path d="M103 391V410"/>
+  </g>
+
+  <g class="node terminal">
+    <rect x="156" y="22" width="248" height="46" rx="13" fill="#16344D"/>
+    <text class="label" x="280" y="53">变更需求</text>
+  </g>
+  <g class="node domain">
+    <rect x="156" y="87" width="248" height="57" rx="13"/>
+    <text class="label" x="280" y="115">业务规则与例外</text>
+    <text class="detail" x="280" y="133">Confluence 原文</text>
+  </g>
+  <g class="node domain">
+    <rect x="156" y="162" width="248" height="54" rx="13"/>
+    <text class="label" x="280" y="190">决策流程步骤</text>
+    <text class="detail" x="280" y="206">Phase / Step</text>
+  </g>
+  <g class="node code">
+    <rect x="156" y="234" width="248" height="58" rx="13"/>
+    <text class="label" x="280" y="262">代码实现</text>
+    <text class="detail" x="280" y="281">固定提交的源码</text>
+  </g>
+  <text class="detail" x="493" y="193">规则映射</text>
+
+  <g class="node tech">
+    <rect x="24" y="333" width="158" height="58" rx="13"/>
+    <text class="label" x="103" y="359">调用关系</text>
+    <text class="detail" x="103" y="380">调用方与共享依赖</text>
+  </g>
+  <g class="node tech">
+    <rect x="201" y="333" width="158" height="58" rx="13"/>
+    <text class="label" x="280" y="359">配置</text>
+    <text class="detail" x="280" y="380">参数与默认值</text>
+  </g>
+  <g class="node tech">
+    <rect x="378" y="333" width="158" height="58" rx="13"/>
+    <text class="label" x="457" y="359">现有测试</text>
+    <text class="detail" x="457" y="380">断言与覆盖</text>
+  </g>
+  <g class="node tech">
+    <rect x="24" y="410" width="158" height="46" rx="13"/>
+    <text class="label" x="103" y="441">下游行为</text>
+  </g>
+</svg>
