@@ -2,6 +2,12 @@
 
 Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具调用和结构化影响报告。默认演示使用合成的 Confluence 页面、两个示例仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
 
+## 当前 V0 工作流
+
+每次运行先绑定 Confluence 文档快照和 Git 提交。LangGraph 随后按 **Main 规划 → Domain 查业务规则 → Code 查实现 → Main 综合 → 影响报告** 的顺序执行。
+
+Code 首轮直接使用 Domain findings 和初始计划。双方首轮完成后，Main 在综合阶段可按证据缺口选择 Domain 或 Code 补查一次，预算允许时执行，再回到 Main 综合。目标流程还会在首次 Code 调查前由 Main 根据业务发现细化验证任务，这个独立步骤待实现。 [当前流程图与对照](docs/agent-spec.md#当前-v0-运行流程) · [Expected Workflow](docs/expected-workflow.md#3-expected-workflow) · [LangGraph 源码](dhub/analyzer.py)
+
 ## 三个 Agent 和提示词
 
 | Agent | 实现 | 模型提示词 | 工具定义 |
@@ -10,7 +16,7 @@ Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具�
 | Domain Knowledge Investigator | [dhub/agents/domain.py](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) | [dhub/tools/domain.py](dhub/tools/domain.py) |
 | Code Investigator | [dhub/agents/code.py](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) | [dhub/tools/code.py](dhub/tools/code.py) |
 
-[LangGraph 入口](dhub/analyzer.py)依次运行需求规划、业务调查、代码调查和报告生成。模型模式把[共用指令与决策基线](dhub/prompts/common.md)和角色提示词组合后发送给网关。默认离线模式使用内置演示场景。
+模型模式将共用指令、决策基线和角色提示词组合后发送给网关。 [共用提示词](dhub/prompts/common.md) · [九个工具的契约](docs/expected-tools.md)
 
 ### 修改或新增工具
 
@@ -43,7 +49,7 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 
 ## 内网配置
 
-从 `.env.example` 复制一份 `.env`。进程环境变量优先于文件。先用 `demo + openai_chat` 验证模型的原生工具调用，再设 `DHUB_DATA_MODE=project` 切换到内网资料。
+从 `.env.example` 复制一份 `.env`。进程环境变量优先于文件。先用 `DHUB_DATA_MODE=demo` 和 `LLM_PROVIDER=openai_chat` 验证网关的原生工具调用。配置下文的文档导出和仓库后，再将 `DHUB_DATA_MODE` 设为 `project`。项目模式需要模型网关。
 
 ### 模型网关
 
@@ -89,7 +95,7 @@ def pull_pages(*, space_key: str, root_page_ids: list[str]) -> Iterable[Confluen
 
 将 `DHUB_REPOS_FILE` 指向配置文件。`ref` 可以是 branch、tag 或 commit，未填时为 `HEAD`。每次分析开始时解析固定提交，然后从版本对象只读搜索与读取，不需要 checkout 其他分支。
 
-项目仓库的语言构成为 94% Python、4% Shell、2% PowerShell。当前单仓库配置可用于联调，PoC 会将成功产出报告的运行标为 `partial`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
+项目仓库的语言构成为 94% Python、4% Shell、2% PowerShell。单仓库配置可用于联调。当前覆盖检查按两个仓库判断，因此单仓库成功产出报告时仍会标为 `partial`。Git 搜索和文件读取的扩展名白名单暂未包含 `.sh` 和 `.ps1`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
 
 CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入。工厂返回满足 [CodeGraphAdapter](dhub/repositories.py) 的对象，接入内网版本的索引查询。`indexed_commit(repo_id)` 返回索引覆盖的提交，`explore(repo_id=..., commit_sha=..., query=...)` 返回可序列化的关系记录数组。后端验证索引与本次提交匹配并提供窗口读取。缺少匹配索引时可以用搜索和带行号的文件阅读继续核实，并在报告中说明覆盖缺口。
 
@@ -102,7 +108,7 @@ CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入�
 ```
 
 - 启动命令仍使用单进程 uvicorn。V0 没有账号隔离，适合本机或经内网接入控制的验证环境。
-- 先打开 `/api/health` 确认运行模式。提交样例后可在网页查看报告，也可通过 `GET /api/runs/{run_id}` 和 `GET /api/runs/{run_id}/events?after_seq=0` 查询。
+- 先打开 `/api/health` 确认数据模式 `data_mode`。提交样例后可在网页查看报告，也可通过 `GET /api/runs/{run_id}` 和 `GET /api/runs/{run_id}/events?after_seq=0` 查询。
 - `partial` 表示有可用输出但调查受限。排查时先查看 Trace 中失败的工具和资料快照，再核对模型是否支持原生工具调用。
 - `DHUB_DB_PATH` 默认是 `.local/runs.sqlite3`。其中保存需求、证据摘要、报告和 Trace。转交内网时复制 `dhub/`、`demo/`、`docs/`、`tests/`、`requirements.txt`、`README.md` 和 `.env.example`。虚拟环境、实际导出、凭证和运行库在目标环境准备。
 - 停止服务用 `Ctrl+C`。将要独立验证的历史请求放入不同数据库文件，便于区分演示和项目运行。
