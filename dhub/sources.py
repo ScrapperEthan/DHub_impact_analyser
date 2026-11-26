@@ -22,6 +22,7 @@ class Sources:
         manifest_path: str | Path | None = None,
         repositories: list[dict] | None = None,
         codegraph: CodeGraphAdapter | None = None,
+        deadline: float | None = None,
     ):
         if data_mode not in {"demo", "project"}:
             raise ValueError("data_mode must be demo or project")
@@ -36,7 +37,7 @@ class Sources:
         for entry in repositories or []:
             repo = Repository(
                 repo_id=entry["repo_id"], root=Path(entry["path"]).resolve(),
-                ref=entry.get("ref") or "HEAD", synthetic=data_mode == "demo",
+                ref=entry.get("ref") or "HEAD", synthetic=data_mode == "demo", deadline=deadline,
             )
             if repo.repo_id in self.repositories:
                 raise ValueError("Repository IDs must be unique")

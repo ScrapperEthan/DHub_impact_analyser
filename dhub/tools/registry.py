@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from langchain_core.tools import StructuredTool
+from pydantic import BaseModel
 
 
 @dataclass(frozen=True)
@@ -18,8 +19,9 @@ def define_tool(
     *,
     trace_fields: tuple[str, ...] = (),
     evidence_factory: Callable[[dict], dict | None] | None = None,
+    args_schema: type[BaseModel] | None = None,
 ) -> ToolDefinition:
-    tool = StructuredTool.from_function(func=handler)
+    tool = StructuredTool.from_function(func=handler, args_schema=args_schema)
     unknown_fields = set(trace_fields) - tool.args.keys()
     if unknown_fields:
         fields = ", ".join(sorted(unknown_fields))

@@ -1,8 +1,8 @@
-# Global Settings（演示）
+# Global Settings (Demo)
 
 ## Frequency Cap
 
-配置对象为 frequency_cap。maximum_contacts 设置次数上限，allow_mandate_campaign_override 控制 Mandatory Campaign 的豁免，适用于使用这份配置的 Inbound 和 Outbound。
+The configuration object is `frequency_cap`. The `maximum_contacts` field sets the contact limit, and `allow_mandate_campaign_override` controls the exemption for Mandatory Campaigns. These settings apply to Inbound and Outbound flows that use this configuration.
 
 | Key | Demo default |
 | --- | --- |
@@ -11,4 +11,4 @@
 
 ## Quiet Time
 
-quiet_time 以独立的 enabled、start_hour 和 end_hour 字段配置。Frequency Cap 不读取这些字段。Shared Global Settings 配置文件可同时包含两组配置。
+`quiet_time` has its own `enabled`, `start_hour`, and `end_hour` fields. Frequency Cap does not read these fields. The shared Global Settings file can contain both configurations.

@@ -6,6 +6,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
+MAX_RUN_TIMEOUT = 300
 
 
 @dataclass(frozen=True)
@@ -25,7 +26,7 @@ class Settings:
     manifest_path: Path | None = None
     repositories: list[dict] = field(default_factory=list)
     codegraph_adapter: str = ""
-    run_timeout: float = 180
+    run_timeout: float = MAX_RUN_TIMEOUT
     llm: LLMConfig = field(default_factory=LLMConfig)
 
     @classmethod
@@ -60,7 +61,7 @@ class Settings:
                     raise ValueError("Use unique repo_id values and string refs")
                 ids.add(entry["repo_id"])
                 entry["path"] = str((config_path.parent / entry["path"]).resolve())
-        run_timeout = float(env.get("DHUB_RUN_TIMEOUT", "180"))
+        run_timeout = float(env.get("DHUB_RUN_TIMEOUT", str(MAX_RUN_TIMEOUT)))
         timeout = float(env.get("LLM_TIMEOUT", "40"))
         max_tokens = int(env["LLM_MAX_TOKENS"]) if env.get("LLM_MAX_TOKENS") else None
         if not (1 <= run_timeout <= 3600 and 1 <= timeout <= 600) or (max_tokens is not None and max_tokens < 1):
@@ -71,6 +72,6 @@ class Settings:
             manifest_path=ROOT / manifest if manifest else None,
             repositories=repositories,
             codegraph_adapter=env.get("DHUB_CODEGRAPH_ADAPTER", "").strip(),
-            run_timeout=run_timeout,
+            run_timeout=min(run_timeout, MAX_RUN_TIMEOUT),
             llm=LLMConfig(provider, base_url, env.get("LLM_API_KEY", "").strip(), model, max_tokens, timeout),
         )

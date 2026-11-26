@@ -112,7 +112,7 @@ class RunStore:
             )
 
     def append_trace(self, run_id: str, event: dict) -> None:
-        if event.get("type") not in ("agent.started", "agent.finished", "tool.started", "tool.finished"):
+        if event.get("type") not in ("agent.started", "agent.finished", "tool.started", "tool.finished", "plan.updated"):
             raise ValueError("Invalid analysis event type")
         if not isinstance(event.get("span_id"), str) or not event["span_id"] or event["span_id"] == "run":
             raise ValueError("Invalid analysis span id")
@@ -125,6 +125,8 @@ class RunStore:
     def _write_event(db: sqlite3.Connection, run_id: str, event: dict, at: str) -> None:
         seq = db.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?", (run_id,)).fetchone()[0]
         payload = {key: value for key, value in event.items() if key in TRACE_FIELDS}
+        if event["type"] == "plan.updated":
+            payload["plan"] = event["plan"]
         payload.update(run_id=run_id, seq=seq, at=at)
         db.execute("INSERT INTO events (run_id, seq, payload) VALUES (?, ?, ?)", (run_id, seq, _json(payload)))
 
@@ -154,7 +156,7 @@ class RunStore:
     ) -> None:
         at = _now()
         run_id = row["run_id"]
-        self._close_open_spans(db, run_id, at, error_code or "SPAN_UNCLOSED", error or "该任务提前结束。")
+        self._close_open_spans(db, run_id, at, error_code or "SPAN_UNCLOSED", error or "The task ended early.")
         db.execute(
             "UPDATE runs SET status = ?, finished_at = ?, report = ?, error = ? WHERE run_id = ?",
             (status, at, _json(report) if report is not None else None, error, run_id),
@@ -170,7 +172,7 @@ class RunStore:
         for record in records:
             event = json.loads(record["payload"])
             kind, phase = event["type"].split(".")
-            if kind == "run":
+            if kind not in {"agent", "tool"}:
                 continue
             key = (kind, event["span_id"])
             if phase == "finished":
@@ -198,7 +200,7 @@ class RunStore:
         with self._transaction() as db:
             rows = db.execute("SELECT run_id, status, started_at FROM runs WHERE status IN ('queued', 'running')").fetchall()
             for row in rows:
-                self._finish_run(db, row, "failed", None, "分析服务停止，运行已中断。", "RUN_INTERRUPTED")
+                self._finish_run(db, row, "failed", None, "The analysis service stopped before the run finished.", "RUN_INTERRUPTED")
 
     def get_run(self, run_id: str) -> dict | None:
         with closing(self._connect()) as db:
@@ -212,11 +214,16 @@ class RunStore:
         return run
 
     def get_events(self, run_id: str, after_seq: int, limit: int = 100) -> list[dict] | None:
+        batch = self.get_event_batch(run_id, after_seq, limit)
+        return batch[1] if batch is not None else None
+
+    def get_event_batch(self, run_id: str, after_seq: int, limit: int = 100) -> tuple[str, list[dict]] | None:
         with closing(self._connect()) as db:
-            if db.execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone() is None:
+            run = db.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+            if run is None:
                 return None
             rows = db.execute(
                 "SELECT payload FROM events WHERE run_id = ? AND seq > ? ORDER BY seq LIMIT ?",
                 (run_id, after_seq, limit),
             ).fetchall()
-        return [json.loads(row["payload"]) for row in rows]
+        return run["status"], [json.loads(row["payload"]) for row in rows]

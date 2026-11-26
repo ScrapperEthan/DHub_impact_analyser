@@ -30,7 +30,7 @@ class OpenAIChat:
         self.config = config
         url = httpx.URL(config.base_url)
         if url.scheme not in {"http", "https"} or not url.host or url.username or url.password or url.query or url.fragment:
-            raise LLMError("LLM_BASE_URL 必须是 HTTP(S) API 根地址或完整 Chat Completions 地址")
+            raise LLMError("LLM_BASE_URL must be an HTTP(S) API base URL or a full Chat Completions URL.")
         base = str(url).rstrip("/")
         self.endpoint = base if base.endswith("/chat/completions") else f"{base}/chat/completions"
         self.transport = transport
@@ -80,13 +80,13 @@ class OpenAIChat:
             usage = data.get("usage") or {}
             return ChatResult(message, usage if isinstance(usage, dict) else {})
         except httpx.TimeoutException:
-            raise LLMError("模型请求超时") from None
+            raise LLMError("The model request timed out.") from None
         except httpx.HTTPStatusError as exc:
-            raise LLMError(f"模型网关返回 HTTP {exc.response.status_code}") from None
+            raise LLMError(f"The model gateway returned HTTP {exc.response.status_code}.") from None
         except httpx.HTTPError:
-            raise LLMError("模型网关连接失败") from None
+            raise LLMError("Unable to connect to the model gateway.") from None
         except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-            raise LLMError("模型网关返回的数据不符合 Chat Completions 约定") from None
+            raise LLMError("The model gateway returned an invalid Chat Completions response.") from None
 
 
 PROVIDERS = {"openai_chat": OpenAIChat}
@@ -95,5 +95,5 @@ PROVIDERS = {"openai_chat": OpenAIChat}
 def create_client(config: LLMConfig) -> ChatClient:
     factory = PROVIDERS.get(config.provider)
     if factory is None:
-        raise LLMError(f"未配置此模型适配器，可用类型为 {', '.join(sorted(PROVIDERS))}")
+        raise LLMError(f"Unknown model provider. Supported providers are {', '.join(sorted(PROVIDERS))}.")
     return factory(config)

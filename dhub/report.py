@@ -43,13 +43,13 @@ def ground_report(report: Report, evidence: dict[str, dict]) -> dict:
     for row in (report.current_support, *report.impact_items, *report.regression_scenarios):
         row.evidence_ids = list(dict.fromkeys(key for key in row.evidence_ids if key in evidence))
     if report.current_support.status != "unknown" and not report.current_support.evidence_ids:
-        report.current_support = CurrentSupport(reason="本次调查缺少可定位的原文或代码证据。")
+        report.current_support = CurrentSupport(reason="This run found no traceable document or code evidence.")
     item_ids = {item.id for item in report.impact_items}
     for item in report.impact_items:
         item.related_item_ids = [key for key in item.related_item_ids if key in item_ids and key != item.id]
         if item.status == "confirmed" and not item.evidence_ids:
             item.status = "unknown"
-            item.reason = "此影响需要补充可定位的原文或代码证据。"
+            item.reason = "This impact needs traceable document or code evidence."
     for scenario in report.regression_scenarios:
         if not scenario.evidence_ids:
             scenario.before = None

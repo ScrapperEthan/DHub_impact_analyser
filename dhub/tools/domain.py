@@ -117,7 +117,7 @@ def _document_evidence(result: dict) -> dict | None:
         return None
     metadata = result["metadata"]
     fields = {key: metadata.get(key) for key in ("page_id", "version", "title", "feature_drop", "source_url")}
-    section = result.get("section") or "整页"
+    section = result.get("section") or "Full page"
     if result.get("offset"):
-        section += f" · 字符偏移 {result['offset']}"
+        section += f" · Character offset {result['offset']}"
     return {**fields, "source_type": "confluence", "section": section, "excerpt": result["content"]}

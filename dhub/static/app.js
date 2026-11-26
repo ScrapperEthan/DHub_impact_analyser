@@ -1,61 +1,40 @@
 "use strict";
 
-const roles = {
-  main: "主 Agent",
-  domain: "业务调查",
-  code: "代码调查",
-};
-
-const statuses = {
-  queued: "等待执行",
-  running: "运行中",
-  succeeded: "已完成",
-  partial: "部分完成",
-  failed: "失败",
-  timeout: "超时",
-  supported: "已支持",
-  partially_supported: "部分支持",
-  change_required: "需要变更",
-  confirmed: "有证据",
-  potential: "潜在",
-  unknown: "待确认",
-};
-
 const kinds = {
-  process: "决策过程",
-  business_rule: "业务规则",
-  code: "代码",
-  configuration: "配置",
-  test: "测试",
-  downstream: "下游",
-  conflict: "冲突",
+  process: "Process step",
+  business_rule: "Business rule",
+  code: "Code",
+  configuration: "Configuration",
+  test: "Test",
+  downstream: "Downstream",
+  conflict: "Conflict",
 };
 
 const effects = {
-  direct_change: "直接变更",
-  indirect_effect: "间接影响",
-  verify: "需要核对",
+  direct_change: "Direct change",
+  indirect_effect: "Indirect impact",
+  verify: "Verify",
 };
 
 const modes = {
-  demo: "演示 · 合成资料",
-  project: "项目资料",
+  demo: "Demo · Synthetic data",
+  project: "Project data",
 };
 
 const coverageLabels = {
-  knowledge_snapshot_id: "知识快照",
-  snapshot_id: "快照",
-  knowledge: "知识资料",
-  documents: "文档",
-  repositories: "仓库",
-  repo_id: "仓库",
-  branch: "分支",
-  commit_sha: "提交",
-  available: "可用",
-  codegraph_available: "调用关系可用",
-  limitations: "限制",
-  missing: "缺失资料",
-  notes: "调查说明",
+  knowledge_snapshot_id: "Knowledge snapshot",
+  snapshot_id: "Snapshot",
+  knowledge: "Knowledge sources",
+  documents: "Documents",
+  repositories: "Repositories",
+  repo_id: "Repository",
+  branch: "Branch",
+  commit_sha: "Commit",
+  available: "Available",
+  codegraph_available: "CodeGraph available",
+  limitations: "Limitations",
+  missing: "Missing sources",
+  notes: "Notes",
 };
 
 const form = document.getElementById("requirement-form");
@@ -66,41 +45,11 @@ const modeTag = document.getElementById("data-mode");
 const runLabel = document.getElementById("run-id");
 const notice = document.getElementById("notice");
 const reportBody = document.getElementById("report");
+const planHost = document.getElementById("plan");
 const traceBody = document.getElementById("trace");
 const traceCount = document.getElementById("trace-count");
 const terminal = new Set(["succeeded", "partial", "failed"]);
 let activeRun;
-
-function element(tag, className = "", text = "") {
-  const item = document.createElement(tag);
-  item.className = className;
-  item.textContent = text;
-  return item;
-}
-
-function label(labels, value) {
-  return Object.hasOwn(labels, value) ? labels[value] : (value ?? "");
-}
-
-function setTag(item, value, text) {
-  item.className = "tag";
-  if (typeof value === "string" && /^[a-z_]+$/.test(value)) {
-    item.classList.add("tag-" + value);
-  }
-  item.textContent = text;
-  item.hidden = !text;
-}
-
-function tag(value, labels = statuses) {
-  const item = element("span");
-  setTag(item, value, label(labels, value));
-  return item;
-}
-
-function asText(value) {
-  if (value === null || value === undefined) return "";
-  return typeof value === "object" ? JSON.stringify(value, null, 2) : String(value);
-}
 
 function setNotice(message = "") {
   notice.textContent = message;
@@ -118,8 +67,8 @@ async function fetchJson(path, options) {
   const response = await fetch(path, { cache: "no-store", ...options });
   const payload = await response.json().catch(() => null);
   if (!response.ok || !payload) {
-    const detail = response.status === 404 ? "找不到该分析运行。" : errorMessage(payload?.detail ?? payload?.error);
-    const error = new Error(detail || ("请求失败（HTTP " + response.status + "）"));
+    const detail = response.status === 404 ? "Analysis run not found." : errorMessage(payload?.detail ?? payload?.error);
+    const error = new Error(detail || `Request failed (HTTP ${response.status}).`);
     error.status = response.status;
     throw error;
   }
@@ -146,7 +95,7 @@ function formatList(value) {
       if (name) row.append(element("span", "", name));
       row.append(formatList(item));
     } else {
-      const text = item === true ? "是" : item === false ? "否" : (item ?? "未知");
+      const text = item === true ? "Yes" : item === false ? "No" : (item ?? "Unknown");
       row.textContent = name ? name + " · " + text : text;
     }
     list.append(row);
@@ -162,16 +111,16 @@ function formatLocator(evidence) {
     return [
       evidence.repo_id,
       (evidence.path || "") + lines,
-      evidence.commit_sha ? "提交 " + evidence.commit_sha : "",
+      evidence.commit_sha ? "Commit " + evidence.commit_sha : "",
       evidence.symbol,
     ].filter(Boolean).join(" · ");
   }
   return [
     evidence.title || evidence.page_id,
     evidence.section,
-    evidence.version ? "版本 " + evidence.version : "",
+    evidence.version ? "Version " + evidence.version : "",
     evidence.feature_drop,
-    evidence.title && evidence.page_id ? "页面 " + evidence.page_id : "",
+    evidence.title && evidence.page_id ? "Page " + evidence.page_id : "",
   ].filter(Boolean).join(" · ");
 }
 
@@ -186,7 +135,7 @@ function evidenceUrl(value) {
 }
 
 function highlightTrace(run, spanId, moveFocus = false) {
-  const row = run.spans.get(spanId)?.row;
+  const row = run.trace.spans.get(spanId)?.row;
   if (!row) return false;
   run.highlightedSpan?.classList.remove("trace-highlight");
   row.classList.add("trace-highlight");
@@ -205,7 +154,7 @@ function evidenceLinks(parent, ids, entries, run) {
   for (const id of ids) {
     const entry = entries.get(id);
     if (!entry) continue;
-    const button = element("button", "button subtle evidence-link", "证据 " + id);
+    const button = element("button", "button subtle evidence-link", "Evidence " + id);
     button.type = "button";
     button.addEventListener("click", () => {
       run.highlightedEvidence?.classList.remove("evidence-target");
@@ -236,7 +185,7 @@ function renderReport(run, report, sourceSnapshot) {
     const actions = element("div", "evidence-actions");
     const url = evidenceUrl(evidence.source_url || evidence.commit_url);
     if (url) {
-      const link = element("a", "button subtle", "打开来源");
+      const link = element("a", "button subtle", "Open Source");
       link.href = url;
       link.target = "_blank";
       link.rel = "noopener noreferrer";
@@ -244,11 +193,11 @@ function renderReport(run, report, sourceSnapshot) {
     }
 
     if (evidence.tool_span_id) {
-      const jump = element("button", "button subtle", "查看工具调用");
+      const jump = element("button", "button subtle", "View Tool Call");
       jump.type = "button";
       jump.addEventListener("click", () => {
         const found = highlightTrace(run, evidence.tool_span_id, true);
-        setNotice(found ? "" : "对应工具记录尚未加载。");
+        setNotice(found ? "" : "The corresponding tool call is still loading.");
       });
       actions.append(jump);
     }
@@ -257,7 +206,7 @@ function renderReport(run, report, sourceSnapshot) {
   }
 
   if (report.requirement_summary || report.assumptions?.length || report.current_support) {
-    const group = section(content, "需求与现有能力");
+    const group = section(content, "Request and Current Support");
     if (report.requirement_summary) group.append(element("p", "text-block", report.requirement_summary));
     if (report.current_support) {
       const support = report.current_support;
@@ -284,20 +233,20 @@ function renderReport(run, report, sourceSnapshot) {
       if (impact.reason) card.append(element("p", "text-block", impact.reason));
       if (impact.related_item_ids?.length) {
         const related = impact.related_item_ids.map((id) => targets.get(id) || id);
-        card.append(element("p", "muted", "关联影响 · " + related.join("、")));
+        card.append(element("p", "muted", "Related impacts · " + related.join(", ")));
       }
       evidenceLinks(card, impact.evidence_ids, entries, run);
       list.append(card);
     }
-    section(content, "影响项").append(list);
+    section(content, "Impacts").append(list);
   }
 
   if (report.regression_scenarios?.length) {
     const list = element("div", "result-list");
     for (const scenario of report.regression_scenarios) {
       const card = element("article", "result-item");
-      card.append(element("p", "result-title", scenario.name || "回归场景"));
-      for (const [key, title] of [["given", "条件"], ["before", "当前预期"], ["proposed", "拟议预期"]]) {
+      card.append(element("p", "result-title", scenario.name || "Regression scenario"));
+      for (const [key, title] of [["given", "Conditions"], ["before", "Current behavior"], ["proposed", "Proposed behavior"]]) {
         if (scenario[key] !== null && scenario[key] !== undefined && scenario[key] !== "") {
           card.append(element("p", "text-block", title + " · " + asText(scenario[key])));
         }
@@ -305,21 +254,21 @@ function renderReport(run, report, sourceSnapshot) {
       evidenceLinks(card, scenario.evidence_ids, entries, run);
       list.append(card);
     }
-    section(content, "回归建议").append(list);
+    section(content, "Regression Scenarios").append(list);
   }
 
   if (report.open_questions?.length) {
-    section(content, "待确认").append(formatList(report.open_questions));
+    section(content, "Open Questions").append(formatList(report.open_questions));
   }
 
   if (entries.size) {
     const list = element("div", "result-list");
     for (const { details } of entries.values()) list.append(details);
-    section(content, "证据来源").append(list);
+    section(content, "Evidence").append(list);
   }
 
   if (report.coverage || sourceSnapshot) {
-    const group = section(content, "调查范围");
+    const group = section(content, "Investigation Coverage");
     if (typeof report.coverage === "string") {
       group.append(element("p", "text-block", report.coverage));
     } else if (report.coverage) {
@@ -327,7 +276,7 @@ function renderReport(run, report, sourceSnapshot) {
     }
     if (sourceSnapshot) {
       const snapshot = element("details", "result-item evidence-item");
-      snapshot.append(element("summary", "", "资料快照"));
+      snapshot.append(element("summary", "", "Source Snapshot"));
       snapshot.append(formatList(sourceSnapshot));
       group.append(snapshot);
     }
@@ -349,132 +298,57 @@ function renderSnapshot(run, snapshot) {
     if (snapshot.report) {
       renderReport(run, snapshot.report, snapshot.source_snapshot);
     } else {
-      const message = terminal.has(status) ? "本次运行暂无可展示的报告。" : "调查正在进行，报告完成后会显示在这里。";
+      const message = terminal.has(status)
+        ? "This run has no report."
+        : "Investigation is underway. The report will appear here when it is ready.";
       reportBody.replaceChildren(element("p", "muted empty-state", message));
     }
   }
 }
 
-function formatTime(value) {
-  if (!value) return "";
-  const time = new Date(value);
-  return Number.isNaN(time.getTime()) ? "" : time.toLocaleTimeString([], { hour12: false });
-}
-
-function formatDuration(value) {
-  if (!Number.isFinite(value)) return "";
-  return value < 1000 ? value + " ms" : (value / 1000).toFixed(2) + " s";
-}
-
-function addTraceDetail(parent, title, value) {
-  if (value === null || value === undefined || value === "") return;
-  const block = element("div");
-  block.append(element("strong", "", title), element("pre", "", asText(value)));
-  parent.append(block);
-}
-
-function createTraceRow(run, event) {
-  const row = element("details", "trace-row");
-  const summary = element("summary");
-  const body = element("div", "trace-detail");
-  row.append(summary, body);
-
-  const tool = event.type.startsWith("tool.");
-  const parent = run.spans.get(event.parent_span_id);
-  const depth = parent ? parent.depth + 1 : 0;
-  row.style.setProperty("--depth", String(depth));
-  run.traceEmpty.hidden = true;
-  traceBody.append(row);
-  if (tool) {
-    run.toolCount += 1;
-    traceCount.textContent = run.toolCount + " 次工具调用";
-  }
-  return { row, summary, body, depth, tool };
-}
-
-function renderTraceEvent(run, event) {
-  if (!["tool.started", "tool.finished", "agent.started", "agent.finished"].includes(event.type)) {
-    return;
-  }
-  if (!event.span_id || run.seen.has(event.seq)) return;
-  run.seen.add(event.seq);
-
-  let span = run.spans.get(event.span_id);
-  if (!span) {
-    span = createTraceRow(run, event);
-    run.spans.set(event.span_id, span);
-  }
-  if (event.type.endsWith(".started")) span.started = event;
-  if (event.type.endsWith(".finished")) span.finished = event;
-  const current = span.finished || span.started;
-  const agentId = current.agent_id || span.started?.agent_id;
-  const agentName = label(roles, agentId);
-  if (Object.hasOwn(roles, agentId)) span.row.classList.add("role-" + agentId);
-
-  const name = span.tool
-    ? current.tool_name || span.started?.tool_name || "工具调用"
-    : current.stage || span.started?.stage || agentName || "Agent 任务";
-  const status = current.status || "running";
-  const detail = element("span", "trace-line");
-  if (agentName) detail.append(element("span", "trace-role", agentName));
-  detail.append(element("span", "trace-name", name), tag(status));
-  const timing = [
-    formatTime(span.started?.at || current.at),
-    formatDuration(current.elapsed_ms),
-  ].filter(Boolean).join(" · ");
-  if (timing) detail.append(element("span", "trace-duration", timing));
-  span.summary.replaceChildren(detail);
-
-  span.body.replaceChildren();
-  addTraceDetail(span.body, "参数摘要", span.started?.input_summary ?? current.input_summary);
-  addTraceDetail(span.body, "结果摘要", current.output_summary);
-  const error = [current.error_code, current.error_summary].filter(Boolean).join(" · ");
-  if (error) span.body.append(element("p", "error-text text-block", error));
-  if (!span.body.childElementCount) {
-    span.body.append(element("p", "muted", span.tool && status === "running" ? "等待工具返回。" : "暂无展开详情。"));
-  }
-}
-
-async function readEventPages(run) {
-  for (let page = 0; page < 6; page += 1) {
-    const payload = await fetchJson(run.path + "/events?after_seq=" + run.cursor, { signal: run.controller.signal });
-    if (activeRun !== run) return true;
-    const events = payload.events ?? [];
-    if (!events.length) return true;
-    for (const event of events) renderTraceEvent(run, event);
-    const cursor = Math.max(run.cursor, Number(payload.next_after_seq) || 0, ...events.map((event) => event.seq));
-    if (cursor <= run.cursor) return true;
-    run.cursor = cursor;
-  }
-  return false;
-}
-
-async function pollRun(run) {
-  let delay = 1000;
+async function followRun(run) {
+  const options = { signal: run.controller.signal, cache: "no-store" };
   try {
-    const snapshot = await fetchJson(run.path, { signal: run.controller.signal });
+    let snapshot = await fetchJson(run.path, options);
     if (activeRun !== run) return;
     renderSnapshot(run, snapshot);
-    const latest = await readEventPages(run);
-    if (activeRun !== run) return;
-    setNotice(errorMessage(snapshot.error));
-    if (terminal.has(snapshot.status) && latest) {
-      if (!run.spans.size) run.traceEmpty.textContent = "这次运行没有调查记录。";
-      return;
+    setNotice();
+    if (!run.finished) {
+      const response = await fetch(run.path + "/stream?after_seq=" + run.cursor, options);
+      if (!response.ok) throw new Error("Unable to open the investigation stream.");
+      await readEventStream(response, event => {
+        if (activeRun !== run) return false;
+        if (event.seq <= run.cursor) return;
+        if (event.type === "plan.updated") run.plan.update(event.plan);
+        if (event.type === "run.started" && !terminal.has(snapshot.status)) {
+          setTag(statusTag, "running", statuses.running);
+        }
+        run.trace.render(event);
+        run.cursor = event.seq;
+        if (event.type === "run.finished") {
+          run.finished = true;
+          return false;
+        }
+      });
     }
-    if (!latest && terminal.has(snapshot.status)) delay = 0;
+    if (activeRun !== run) return;
+    if (!run.finished) throw new Error("The investigation stream disconnected.");
+    if (!terminal.has(snapshot.status)) snapshot = await fetchJson(run.path, options);
+    if (activeRun !== run) return;
+    renderSnapshot(run, snapshot);
+    setNotice(errorMessage(snapshot.error));
+    if (!run.trace.spans.size) run.traceEmpty.textContent = "This run has no investigation steps.";
   } catch (error) {
     if (activeRun !== run || error.name === "AbortError") return;
     if (error.status === 404) {
-      setTag(statusTag, "failed", "运行不可用");
+      setTag(statusTag, "failed", "Run unavailable");
       reportBody.replaceChildren(element("p", "muted empty-state", error.message));
       setNotice(error.message);
       return;
     }
-    setNotice("读取运行记录失败，正在重试。 " + error.message);
-    delay = 2000;
+    setNotice("Unable to load the run. Retrying. " + error.message);
+    run.timer = setTimeout(() => followRun(run), 2000);
   }
-  run.timer = setTimeout(() => pollRun(run), delay);
 }
 
 function openRun(id, status = "queued") {
@@ -485,24 +359,26 @@ function openRun(id, status = "queued") {
   const url = new URL(window.location.href);
   url.searchParams.set("run", id);
   window.history.replaceState(null, "", url);
+  const traceEmpty = element("p", "muted empty-state", "Waiting for investigation steps.");
   const run = {
     path: "/api/runs/" + encodeURIComponent(id),
     cursor: 0,
-    toolCount: 0,
-    seen: new Set(),
-    spans: new Map(),
+    finished: false,
     controller: new AbortController(),
-    traceEmpty: element("p", "muted empty-state", "等待调查记录。"),
+    traceEmpty,
+    trace: createTraceView(traceBody, traceCount, traceEmpty),
+    plan: createPlanView(planHost),
   };
   activeRun = run;
   setTag(statusTag, status, label(statuses, status));
   setTag(modeTag, "", "");
-  runLabel.textContent = "运行 " + id;
+  runLabel.textContent = "Run " + id;
   setNotice();
-  traceBody.replaceChildren(run.traceEmpty);
-  traceCount.textContent = "0 次工具调用";
-  reportBody.replaceChildren(element("p", "muted empty-state", "正在读取分析记录。"));
-  void pollRun(run);
+  planHost.replaceChildren();
+  traceBody.replaceChildren(traceEmpty);
+  traceCount.textContent = "0 tool calls";
+  reportBody.replaceChildren(element("p", "muted empty-state", "Loading the analysis run."));
+  void followRun(run);
 }
 
 document.getElementById("fill-example").addEventListener("click", () => {
@@ -514,7 +390,7 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = requirement.value.trim();
   if (!text) {
-    setNotice("请输入一条变更需求。");
+    setNotice("Enter a change request.");
     requirement.focus();
     return;
   }
@@ -526,10 +402,10 @@ form.addEventListener("submit", async (event) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ requirement: text }),
     });
-    if (!created.run_id) throw new Error("接口未返回运行 ID。");
+    if (!created.run_id) throw new Error("The server did not return a run ID.");
     openRun(created.run_id, created.status);
   } catch (error) {
-    setNotice("提交失败。 " + error.message);
+    setNotice("Unable to start analysis. " + error.message);
   } finally {
     submit.disabled = false;
   }

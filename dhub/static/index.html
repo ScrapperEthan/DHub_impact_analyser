@@ -1,28 +1,34 @@
 <!doctype html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>DHub Process Impact Analyser</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/investigation.js" defer></script>
   <script src="/static/app.js" defer></script>
 </head>
 <body>
   <header class="site-header">
-    <div class="shell">
+    <div class="shell site-header-content">
       <h1>DHub Process Impact Analyser</h1>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="/" aria-current="page">Impact Analysis</a>
+        <a href="/chat">Agent Chat</a>
+      </nav>
     </div>
   </header>
 
   <main class="shell workspace">
-    <form id="requirement-form" class="panel request-panel">
+    <form id="requirement-form" class="panel request-panel" novalidate>
       <div class="heading-row">
-        <label class="section-title" for="requirement">变更需求</label>
-        <button type="button" class="button subtle" id="fill-example">填入示例</button>
+        <label class="section-title" for="requirement">Change Request</label>
+        <button type="button" class="button subtle" id="fill-example">Use Example</button>
       </div>
-      <textarea id="requirement" name="requirement" rows="4" placeholder="描述拟议变更、适用渠道和期望行为" required></textarea>
+      <textarea id="requirement" name="requirement" rows="4" placeholder="Describe the proposed change, affected channels, and expected behavior" required></textarea>
       <div class="form-footer">
-        <button class="button primary" id="submit" type="submit">开始分析</button>
+        <button class="button primary" id="submit" type="submit">Run Analysis</button>
         <div class="run-meta" aria-live="polite">
           <span id="run-status" class="tag" hidden></span>
           <span id="data-mode" class="tag" hidden></span>
@@ -35,29 +41,32 @@
     <div class="poc-results">
       <section class="panel report-panel" aria-labelledby="report-title">
         <div class="panel-header">
-          <h2 id="report-title">影响报告</h2>
+          <h2 id="report-title">Impact Report</h2>
         </div>
         <div id="report" class="panel-body">
-          <p class="muted empty-state">提交一条变更需求后，这里会显示影响、依据和回归建议。</p>
+          <p class="muted empty-state">Submit a change request to see impacts, evidence, and regression scenarios.</p>
         </div>
       </section>
 
-      <section class="panel trace-panel" aria-labelledby="trace-title">
-        <div class="panel-header">
-          <div class="heading-row">
-            <h2 id="trace-title">调查 Trace</h2>
-            <span class="muted trace-count" id="trace-count">0 次工具调用</span>
+      <div class="investigation-column">
+        <div id="plan"></div>
+        <section class="panel trace-panel" aria-labelledby="trace-title">
+          <div class="panel-header">
+            <div class="heading-row">
+              <h2 id="trace-title">Investigation Trace</h2>
+              <span class="muted trace-count" id="trace-count">0 tool calls</span>
+            </div>
+            <div class="role-key" aria-label="Investigation roles">
+              <span class="role-main">Main Agent</span>
+              <span class="role-domain">Domain Investigator</span>
+              <span class="role-code">Code Investigator</span>
+            </div>
           </div>
-          <div class="role-key" aria-label="调查角色">
-            <span class="role-main">主 Agent</span>
-            <span class="role-domain">业务调查</span>
-            <span class="role-code">代码调查</span>
+          <div id="trace" class="panel-body trace-list" aria-label="Tool call timeline">
+            <p id="trace-empty" class="muted empty-state">Investigation steps will appear here as they run.</p>
           </div>
-        </div>
-        <div id="trace" class="panel-body trace-list" aria-label="工具调用时间线">
-          <p id="trace-empty" class="muted empty-state">开始调查后可以在这里查看工具调用。</p>
-        </div>
-      </section>
+        </section>
+      </div>
     </div>
   </main>
 </body>

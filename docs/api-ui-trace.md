@@ -2,24 +2,29 @@
 
 ## 最小运行服务
 
-FastAPI 接收需求并运行 LangGraph。建议单进程后台执行分析，使用 SQLite 保存运行记录、报告和追加式 Trace 事件。开发部署支持 `demo` 和 `project` 两种配置，固定到一次运行的资料快照。演示模式醒目标明使用合成资料，项目模式如实报告数据源状态。
+FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite 保存运行记录、报告、Trace 和计划版本。开发部署支持 `demo` 和 `project` 两种配置，固定到一次运行的资料快照。演示模式醒目标明使用合成资料，项目模式如实报告数据源状态。
 
 | 方法与路径 | 契约 |
 | --- | --- |
 | `POST /api/runs` | 接收 `{"requirement":"…"}`，去掉首尾空白后应有文本。创建记录后返回 `202` 和 `{run_id, status}`。空白或格式无效返回 `422` |
 | `GET /api/runs/{run_id}` | 返回 `run_id`、`status`、`data_mode`、`source_snapshot`、`report` 和可读的 `error`（如有）。报告生成前 `report` 为 `null` |
 | `GET /api/runs/{run_id}/events?after_seq=0` | 返回序号大于 `after_seq` 的事件，按 `seq` 递增。响应包含 `events` 和 `next_after_seq`，空列表沿用游标。可以用固定页长分批读取 |
+| `GET /api/runs/{run_id}/stream?after_seq=0` | 随运行逐条发送同一事件序列。收到终态事件后结束，可用最后处理的 `seq` 恢复读取 |
+| `POST /api/chat` | 接收 `{"message":"…","history":[{"user":"…","assistant":"…"}]}`，完成后返回 `{"reply":"…"}`。`history` 可省略 |
+| `POST /api/chat/stream` | 接收同一聊天请求，逐条发送本轮调查、计划和终态事件 |
 
 未知运行返回 `404`。`source_snapshot` 包含知识快照 ID、导入覆盖范围和仓库列表，每条记录含仓库标识、分支、提交及可用性。缺失字段反映为未知或不可用。仓库在 detached HEAD 时分支可以为空，commit SHA 仍用于定位。
 
 | 运行状态 | 含义 |
 | --- | --- |
 | `queued` / `running` | 已接收，等待执行或调查进行中 |
-| `succeeded` | 已完成计划中的调查并生成有效报告。报告可以有调查看过的开放问题 |
+| `succeeded` | 已交付有效报告。报告可以包含覆盖范围内仍需业务方确认的问题 |
 | `partial` | 关键调查受限但已有可用报告，例如资料缺失、工具超时、预算用尽或需求范围不足。报告解释缺口 |
 | `failed` | 无法交付可用报告。错误与已发生的 Trace 仍可查看 |
 
-前端按 `run_id` 和游标轮询，例如每 1 秒。结束时读完最后一批事件。刷新页面可用相同 `run_id` 重新加载两端数据。后端在同一事务中保存最终报告（如有）、运行终态和终态事件。进程重启中断的运行应收敛到 `partial` 或 `failed`，打开的调用以中断原因结尾，已有事件可回看。
+流式接口使用 `application/x-ndjson`，每个 UTF-8 JSON 对象占一行。分析页断线后从最近的 `seq` 继续，刷新可用相同 `run_id` 回放计划与 Trace。服务端在同一事务中保存报告（如有）、运行终态和 `run.finished`。进程重启后，中断运行进入 `failed`，打开的调用以中断原因结尾，已有事件可回看。
+
+聊天事件按到达顺序处理，终态为 `{"type":"chat.completed","reply":"…"}` 或 `{"type":"chat.error","status":502,"detail":"…"}`，其中 `status` 是语义状态码。请求体校验仍返回 HTTP `422`。聊天页面保留当前会话中的调查步骤和计划，刷新时从标签页会话恢复问答文本。最终聊天文本在校验后随 `chat.completed` 发送，分析报告随终态从运行快照读取。
 
 ## 影响报告约定
 
@@ -47,12 +52,12 @@ FastAPI 接收需求并运行 LangGraph。建议单进程后台执行分析，�
 
 ## Trace 事件
 
-服务端在执行边界记录事件。真实工具执行开始时写入 `tool.started`，结束时写入 `tool.finished`，两者共享 `span_id`。超时和失败在结束事件中展示。每个 Investigator 的一次派单也有开始和结束，归在主 Agent 调查下面。若用 LangGraph 流式更新对接事件，自定义数据可从节点或工具发出，应用仍以自己持久化的事件为 UI 契约。[LangGraph Streaming](https://docs.langchain.com/oss/python/langgraph/streaming)
+服务端在执行边界记录事件。真实工具执行开始时写入 `tool.started`，结束时写入 `tool.finished`，两者共享 `span_id`。超时和失败在结束事件中展示。每次 Investigator 派单记录为主 Agent 下的 `agent.started` 和 `agent.finished`，并在 `input_summary.question` 保存经过裁剪的派单问题。
 
 | 字段或规则 | 用途 |
 | --- | --- |
-| `run_id`、`seq`、`at` | 运行 ID、服务端分配的连续递增序号、ISO 8601 时间 |
-| `type` | `run.started`、`run.finished`、`agent.started`、`agent.finished`、`tool.started`、`tool.finished` |
+| `run_id`、`seq`、`at` | 分析事件附有运行 ID、连续递增序号及 ISO 8601 时间 |
+| `type` | `run.started`、`run.finished`、`agent.started`、`agent.finished`、`tool.started`、`tool.finished`、`plan.updated` 或聊天终态 |
 | `span_id`、`parent_span_id`、`agent_id` | 关联同一事件对和调用层级。Run 是根。`agent_id` 为 `main`、`domain`、`code`，Run 事件可为空 |
 | `status`、`elapsed_ms` | 开始时为 `running`。结束时记录实际结果和耗时。工具结束可为 `succeeded`、`failed`、`timeout` |
 | `stage` 或 `tool_name` | Agent 任务摘要或实际工具名。重复调用各有自己的 `span_id` |
@@ -79,9 +84,36 @@ FastAPI 接收需求并运行 LangGraph。建议单进程后台执行分析，�
 
 Trace 的可见内容限于执行事实和获准展示的业务摘要。服务端在保存事件前过滤凭证、敏感参数和长原文，前端按文本安全显示。工具尚在运行时可看到开始事件，工具失败时同一行显示失败原因。前端按 `seq` 去重并用 `span_id` 合并开始和结束事件。
 
+## 调查计划事件
+
+当 Main 接受新计划或修订时，`plan.updated` 携带完整的计划快照。其 `span_id` 指向所属 Main，版本从 1 开始，在该次请求内递增。前端收到后更新调查计划，并可以回看早期版本。采用直接答复或隐式规划时，页面随实际调用展示 Trace。
+
+```json
+{
+  "type": "plan.updated",
+  "agent_id": "main",
+  "span_id": "main-1",
+  "plan": {
+    "version": 3,
+    "goal": "Assess the impact of removing the Frequency Cap exemption for Outbound Mandatory Campaigns",
+    "scope": {"Affected channel": "Outbound", "Regression scope": "Existing Inbound behavior"},
+    "candidate_steps": ["P5 Step 18 · Frequency Cap"],
+    "tasks": [
+      {"id": "T1", "agent": "domain", "question": "Verify the exemption rule", "status": "completed"},
+      {"id": "T2", "agent": "code", "question": "Check the shared implementation", "status": "completed"},
+      {"id": "T3", "agent": "code", "question": "Review configuration and regression assertions", "status": "in_progress"}
+    ],
+    "reason": "Both channels use the same implementation. Check whether the change can be isolated to Outbound."
+  }
+}
+```
+
+字段约束和任务状态见 [update_plan](expected-tools.md#12-update_plan)。计划描述待答问题及其状态，报告引用本次运行实际读取的证据。
+
 ## 页面要求
 
-- **输入区**提供需求文本框、一条可填入的示例和「开始分析」。创建运行后显示当前状态和资料模式。
-- **报告区**把摘要和适用范围放在前面，随后展示影响项、风险或冲突、回归建议和待确认项。用文字标签标识「有证据」「潜在」「待确认」。点击一条证据可查看来源定位，并高亮对应工具调用。
+- **输入区**提供 **Change Request** 文本框、**Use Example** 和 **Run Analysis**。创建运行后显示当前状态和资料模式。
+- **报告区**把摘要和适用范围放在前面，随后展示影响项、风险或冲突、回归建议和待确认项。用 **Evidence-backed**、**Potential** 和 **Unverified** 标识证据状态。点击一条证据可查看来源定位，并高亮对应工具调用。
 - **Trace 区**按时间显示三个 Agent 的任务和下挂的工具调用。角色用名称、颜色和缩进识别，例如主 Agent 用蓝、业务调查用紫、代码调查用绿。每行显示工具名、状态和时间或耗时，展开后可看到参数摘要、命中数、证据 ID 和错误摘要。
-- **布局**桌面可用报告与 Trace 双栏，窄屏上下堆叠。运行中随轮询更新事件，终态仍可滚动和展开。部分结果和失败都应有说明，用户可以修改输入再次发起运行。
+- **调查计划**展示版本、完成计数、范围、候选步骤、任务状态和修订原因。用 **Previous Version** 和 **Next Version** 回看变化。聊天页在对应消息下显示该轮调查步骤和计划。
+- **布局**桌面用报告与调查双栏，窄屏上下堆叠。逐事件更新进度，终态可滚动和展开。部分结果和失败保留相应说明，用户可以修改输入再次发起运行。

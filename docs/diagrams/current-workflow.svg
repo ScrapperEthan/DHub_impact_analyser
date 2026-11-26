@@ -1,85 +1,48 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="560" height="638" viewBox="0 0 560 638" role="img" aria-labelledby="title desc">
-  <title id="title">当前 V0 LangGraph 流程</title>
-  <desc id="desc">业务调查完成后直接进入代码调查。Main 综合发现，按是否有补查任务选择条件边。补查执行一次后回到综合。</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="560" height="390" viewBox="0 0 560 390" role="img" aria-labelledby="title desc">
+  <title id="title">在线聊天与影响分析的共同流程</title>
+  <desc id="desc">绑定快照后进入 Main。Main 按需派 Domain 或 Code 调查，接收发现并重新判断，最后校验回复或报告。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
     </marker>
-    <marker id="amber-arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
-      <path d="M0 0 10 5 0 10 2 5Z" fill="#A15C11"/>
-    </marker>
   </defs>
   <style>
     text { font-family: "Microsoft YaHei UI", "PingFang SC", "Noto Sans CJK SC", system-ui, sans-serif; text-anchor: middle; fill: #152C41; }
-    .label { font-size: 24px; font-weight: 700; }
-    .detail { font-size: 17px; fill: #37536C; }
-    .identifier { font-family: Consolas, "SFMono-Regular", monospace; font-size: 17px; fill: #37536C; }
+    .label { font-size: 23px; font-weight: 700; }
+    .detail { font-size: 16px; fill: #37536C; }
     .terminal .label { fill: #FFFFFF; }
     .terminal .detail { fill: #D5E7F6; }
-    .node rect { stroke-width: 1.5; }
-    .main rect { fill: #EAF2FF; stroke: #6393CB; }
-    .domain rect { fill: #E6F5F0; stroke: #43967E; }
-    .code rect { fill: #F1EDFC; stroke: #8B74BC; }
-    .branch { font-size: 17px; font-weight: 700; }
-    .amber { fill: #79440D; }
   </style>
-
-  <rect x="1" y="1" width="558" height="636" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
+  <rect x="1" y="1" width="558" height="388" rx="19" fill="#F8FAFD" stroke="#CFDCEA" stroke-width="2"/>
 
   <g fill="none" stroke="#526A82" stroke-width="2.5" marker-end="url(#arrow)">
-    <path d="M178 82V103"/>
-    <path d="M178 167V188"/>
-    <path d="M178 252V273"/>
-    <path d="M178 337V358"/>
-    <path d="M178 422V444"/>
-    <path d="M178 526V550"/>
+    <path d="M169 86V133"/>
+    <path d="M307 153H369"/>
+    <path d="M454 213V242H321Q307 242 307 228V193"/>
+    <path d="M169 213V295"/>
   </g>
-  <g fill="none" stroke="#A15C11" stroke-width="2.5" marker-end="url(#amber-arrow)">
-    <path d="M332 485H368"/>
-    <path d="M452 449V398Q452 390 444 390H332" stroke-dasharray="6 5"/>
-  </g>
+  <text class="detail" x="338" y="143">派单</text>
+  <text class="detail" x="394" y="265">发现与证据</text>
+  <text class="detail" x="111" y="258">校验输出</text>
 
-  <g class="node terminal">
-    <rect x="24" y="22" width="308" height="60" rx="13" fill="#16344D"/>
-    <text class="label" x="178" y="51">进入 LangGraph</text>
-    <text class="detail" x="178" y="71">START · 快照已绑定</text>
+  <g class="terminal">
+    <rect x="31" y="22" width="276" height="64" rx="13" fill="#16344D"/>
+    <text class="label" x="169" y="50">绑定资料快照</text>
+    <text class="detail" x="169" y="72">聊天请求或影响分析</text>
   </g>
-  <g class="node main">
-    <rect x="24" y="103" width="308" height="64" rx="13"/>
-    <text class="label" x="178" y="130">Main · 规划需求</text>
-    <text class="identifier" x="178" y="153">plan_requirement</text>
+  <g>
+    <rect x="31" y="133" width="276" height="80" rx="13" fill="#EAF2FF" stroke="#6393CB" stroke-width="1.5"/>
+    <text class="label" x="169" y="166">Main · 规划和综合</text>
+    <text class="detail" x="169" y="191">根据问题和证据决定下一步</text>
   </g>
-  <g class="node domain">
-    <rect x="24" y="188" width="308" height="64" rx="13"/>
-    <text class="label" x="178" y="215">Domain · 查业务规则</text>
-    <text class="identifier" x="178" y="238">investigate_domain</text>
+  <g>
+    <rect x="369" y="133" width="168" height="80" rx="13" fill="#E6F5F0" stroke="#43967E" stroke-width="1.5"/>
+    <text class="label" x="453" y="166">Domain 或 Code</text>
+    <text class="detail" x="453" y="191">按问题调查</text>
   </g>
-  <g class="node code">
-    <rect x="24" y="273" width="308" height="64" rx="13"/>
-    <text class="label" x="178" y="300">Code · 查代码实现</text>
-    <text class="identifier" x="178" y="323">investigate_code</text>
-  </g>
-  <g class="node main">
-    <rect x="24" y="358" width="308" height="64" rx="13"/>
-    <text class="label" x="178" y="385">Main · 综合发现</text>
-    <text class="identifier" x="178" y="408">synthesize</text>
-  </g>
-  <g class="node">
-    <path d="M178 444 332 485 178 526 24 485Z" fill="#FFF3DD" stroke="#BC7C2B" stroke-width="1.5"/>
-    <text class="label amber" x="178" y="493">有补查任务？</text>
-  </g>
-  <text class="branch amber" x="350" y="475">有</text>
-  <text class="branch" x="200" y="543">无</text>
-  <text class="branch amber" x="427" y="378">追加发现</text>
-
-  <g class="node">
-    <rect x="368" y="449" width="168" height="75" rx="13" fill="#FFF3DD" stroke="#BC7C2B"/>
-    <text class="label amber" x="452" y="480">执行一次补查</text>
-    <text class="detail amber" x="452" y="505">Domain 或 Code</text>
-  </g>
-  <g class="node terminal">
-    <rect x="24" y="550" width="308" height="64" rx="13" fill="#16344D"/>
-    <text class="label" x="178" y="577">返回影响报告</text>
-    <text class="detail" x="178" y="601">END · 引用已校验</text>
+  <g class="terminal">
+    <rect x="31" y="295" width="276" height="64" rx="13" fill="#16344D"/>
+    <text class="label" x="169" y="323">交付结果</text>
+    <text class="detail" x="169" y="345">回复或结构化影响报告</text>
   </g>
 </svg>

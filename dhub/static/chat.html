@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Agent Chat · DHub Process Impact Analyser</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/investigation.js" defer></script>
+  <script src="/static/chat.js" defer></script>
+</head>
+<body class="chat-page">
+  <header class="site-header">
+    <div class="shell site-header-content">
+      <h1>DHub Process Impact Analyser</h1>
+      <nav class="site-nav" aria-label="Main navigation">
+        <a href="/">Impact Analysis</a>
+        <a href="/chat" aria-current="page">Agent Chat</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="shell chat-workspace">
+    <section class="panel chat-panel" aria-labelledby="chat-title">
+      <div class="panel-header chat-header">
+        <h2 id="chat-title">Agent Chat</h2>
+        <button class="button subtle" id="new-chat" type="button" disabled>New Chat</button>
+        <p id="chat-mode" class="muted chat-mode" hidden>Offline demo. Connect a model gateway to ask questions beyond the example.</p>
+      </div>
+
+      <div class="chat-scroll" id="chat-scroll" role="region" aria-label="Conversation history" tabindex="0">
+        <div id="chat-history" class="chat-history" role="log" aria-relevant="additions"></div>
+        <div id="chat-empty" class="chat-empty">
+          <p>Ask about DHub processes, business rules, or code.</p>
+          <button class="button" id="chat-example" type="button">What is Frequency Cap?</button>
+        </div>
+      </div>
+
+      <form id="chat-form" class="chat-form" novalidate>
+        <label class="visually-hidden" for="chat-input">Message</label>
+        <textarea id="chat-input" name="message" rows="2" maxlength="8000" placeholder="Type a message…" aria-describedby="chat-shortcuts" required></textarea>
+        <div class="form-footer">
+          <span class="muted chat-shortcuts" id="chat-shortcuts">Enter to send · Shift+Enter for a new line</span>
+          <button class="button primary" id="chat-send" type="submit" disabled>Send</button>
+        </div>
+        <p class="chat-status" id="chat-status" role="status" hidden></p>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

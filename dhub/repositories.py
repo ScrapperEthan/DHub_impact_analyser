@@ -6,6 +6,7 @@ import os
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
+from time import monotonic
 from typing import Protocol
 
 from .source_utils import SourceError, path_in_source, query_tokens, read_source_text, relative_path
@@ -24,7 +25,7 @@ class CodeGraphAdapter(Protocol):
     def explore(self, *, repo_id: str, commit_sha: str, query: str) -> list[dict]: ...
 
 
-def _git(root: Path, *args: str, allow_no_matches: bool = False) -> bytes:
+def _git(root: Path, *args: str, allow_no_matches: bool = False, timeout: float = 20) -> bytes:
     env = {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
@@ -37,7 +38,7 @@ def _git(root: Path, *args: str, allow_no_matches: bool = False) -> bytes:
     try:
         result = subprocess.run(
             ["git", "--no-pager", "-c", "core.fsmonitor=false", "-C", str(root), *args],
-            capture_output=True, timeout=20, env=env, check=False,
+            capture_output=True, timeout=timeout, env=env, check=False,
         )
     except subprocess.TimeoutExpired:
         raise SourceError("source_timeout", "The read-only Git operation timed out.") from None
@@ -58,6 +59,13 @@ class Repository:
     commit_sha: str | None = None
     files: dict[str, tuple[str, int] | str] = field(default_factory=dict)
     error: str | None = None
+    deadline: float | None = None
+
+    def _git(self, *args: str, allow_no_matches: bool = False) -> bytes:
+        timeout = 20 if self.deadline is None else min(20, self.deadline - monotonic())
+        if timeout <= 0:
+            raise SourceError("source_timeout", "The run deadline has been reached.")
+        return _git(self.root, *args, allow_no_matches=allow_no_matches, timeout=timeout)
 
     def pin(self) -> None:
         try:
@@ -79,21 +87,21 @@ class Repository:
                     raise SourceError("repository_unavailable", "The synthetic repository contains no readable files.")
                 self.commit_sha = digest.hexdigest()
                 return
-            git_root = Path(_git(self.root, "rev-parse", "--show-toplevel").decode("utf-8").strip())
+            git_root = Path(self._git("rev-parse", "--show-toplevel").decode("utf-8").strip())
             if git_root.resolve() != self.root.resolve():
                 raise SourceError("repository_unavailable", "Configure the root of the Git checkout.")
-            self.commit_sha = _git(
-                self.root, "rev-parse", "--verify", "--end-of-options", f"{self.ref}^{{commit}}"
+            self.commit_sha = self._git(
+                "rev-parse", "--verify", "--end-of-options", f"{self.ref}^{{commit}}"
             ).decode("ascii").strip()
             try:
-                branch = _git(
-                    self.root, "rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", self.ref
+                branch = self._git(
+                    "rev-parse", "--symbolic-full-name", "--verify", "--end-of-options", self.ref
                 ).decode("utf-8").strip()
                 if branch.startswith("refs/heads/"):
                     self.branch = branch.removeprefix("refs/heads/")
             except (SourceError, ValueError):
                 pass
-            tree = _git(self.root, "ls-tree", "-r", "-l", "-z", "--full-tree", self.commit_sha)
+            tree = self._git("ls-tree", "-r", "-l", "-z", "--full-tree", self.commit_sha)
             for entry in tree.split(b"\0"):
                 if not entry:
                     continue
@@ -126,7 +134,7 @@ class Repository:
         oid, length = entry
         if length > MAX_CODE_BYTES:
             raise SourceError("source_too_large", "Source exceeds the configured file size limit.")
-        blob = _git(self.root, "cat-file", "blob", oid)
+        blob = self._git("cat-file", "blob", oid)
         try:
             content = blob.decode("utf-8-sig")
         except UnicodeError:
@@ -147,8 +155,8 @@ class Repository:
             )
         else:
             args = [part for query in queries for part in ("-e", query)]
-            output = _git(
-                self.root, "grep", "--no-textconv", "-I", "-i", "-F", "-n", "-z", "--full-name",
+            output = self._git(
+                "grep", "--no-textconv", "-I", "-i", "-F", "-n", "-z", "--full-name",
                 f"--max-count={limit}", *args, self.commit_sha, "--",
                 *(f":(glob)**/*{extension}" for extension in sorted(extensions)),
                 allow_no_matches=True,

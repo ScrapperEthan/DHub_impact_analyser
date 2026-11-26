@@ -7,7 +7,7 @@ DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更�
 | Document | Scope |
 | --- | --- |
 | [Expected Workflow](expected-workflow.md) | 三个 Agent 的目标流程、Decision Process Baseline、Frequency Cap 示例、当前 LangGraph 与目标的差距 |
-| [Expected Tools](expected-tools.md) | 九个只读工具的契约、数据快照、V0 搜索与 CodeGraph、V1 Hybrid RAG 候选设计 |
+| [Expected Tools](expected-tools.md) | Main Agent 规划和派单、九个只读工具、数据快照、V0 搜索与 CodeGraph、V1 Hybrid RAG 候选设计 |
 | [Project README](../README.md) | 本地启动、模型配置、导入 Confluence、接入 Git 与 CodeGraph |
 
 ## V0 PoC Specifications
@@ -16,7 +16,7 @@ DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更�
 | --- | --- |
 | [PoC Requirements](poc-requirements.md) | V0 产品需求、Decision Process Baseline、交付范围 |
 | [Agent Spec](agent-spec.md) | 当前 V0 流程、与目标的交接差异、Agent 职责及工具 |
-| [API, UI and Trace](api-ui-trace.md) | API、网页、报告与 Trace 契约 |
+| [API, UI and Trace](api-ui-trace.md) | API、网页、报告与流式计划和 Trace 契约 |
 | [PoC Acceptance](poc-acceptance.md) | 合成案例、异常场景、真实项目评估 |
 
 ## 版本路线图
@@ -27,8 +27,8 @@ V0 的验收范围以 [PoC Requirements](poc-requirements.md) 为准。V1 和 V2
 | --- | --- | --- | --- |
 | 业务知识 | 已支持 Markdown、manifest、目录与关键词检索、版本化原文。内网 Confluence provider 待接入 | 完善基线、术语表和别名，增加 Hybrid RAG 与可选的轻量 Topic Wiki | 经治理的规则目录，以及在需要复用规则、流程步骤和实体关系时评估业务知识图谱 |
 | 代码调查 | 已支持本地 Git 固定提交、只读搜索和原文阅读。CodeGraph 有适配接口和合成数据。单仓库覆盖判断及 Shell、PowerShell 文件支持待补齐 | 联调真实代码、配置、测试、共享调用及 MDC 索引 | 跨服务、配置及事件依赖识别，持续更新索引 |
-| 影响分析 | 三个 Agent 已串起调查、综合、一次补查和报告，支持可定位证据与报告内关联。独立二次派单、强类型交接和证据语义校验仍待补齐 | 结构化需求与任务，保留补查上下文，用历史需求 Golden Set 验证结论和证据 | 持久化规则、流程步骤、代码、配置与测试之间的关系，按需增加独立的 persona/simulation 验证 |
-| 产品交付 | 已有 Web UI、API、Trace、SQLite 回放和合成演示，已有测试覆盖离线与模拟模型网关。真实项目质量评估与部署验证待完成 | 内网联调、BA/Developer 验收、授权和数据治理 | 持续更新知识，支持团队复用与流程集成 |
+| 影响分析 | 聊天和报告共用主 Agent 的自适应规划、多轮派单、历史发现和证据登记。支持可定位证据与报告内关联 | 加强任务与 findings 的证据关联，用历史需求 Golden Set 验证结论和证据 | 持久化规则、流程步骤、代码、配置与测试之间的关系，按需增加独立的 persona/simulation 验证 |
+| 产品交付 | Web UI 流式显示调查步骤和计划，SQLite 支持分析回放。已有测试覆盖离线与模拟模型网关。真实项目质量评估与部署验证待完成 | 内网联调、BA/Developer 验收、授权和数据治理 | 持续更新知识，支持团队复用与流程集成 |
 
 ### 联调与评估顺序
 
@@ -36,7 +36,7 @@ V0 的验收范围以 [PoC Requirements](poc-requirements.md) 为准。V1 和 V2
 2. **建立 Golden Set。** 选择 BA 与 Developer 已核对的历史变更，标注规则、例外、Step、源码、依赖和回归场景，记录文档和代码版本，优先采用开发前的快照。
 3. **测量 V0 基线。** 统计规则与例外召回、代码影响准确率与召回率、引用正确性、冲突检出、缺少支持的确认项、工具次数和耗时。按检索、工具覆盖和 Main 综合定位漏检或误判。
 4. **用同一批案例验证检索升级。** 评估章节级 BM25/FTS 与向量召回、结果融合及原文追溯，同时沿用现有工具接口。
-5. **加强任务和证据契约。** 评估独立的代码任务细化，为需求、任务和两侧 findings 建立结构化类型，向补查传递历史发现、证据和缺口，校验结论与原文是否对齐。
+5. **加强任务和证据契约。** 为需求、任务和两侧 findings 建立结构化类型，校验结论与原文是否对齐。
 6. **按复用需求持久化关联。** 先用关联表或索引复用已核实的规则、步骤、代码、配置与测试关系。关系复杂度和重复调查量足以支撑投入时，再评估业务知识图谱。CodeGraph 继续用于代码静态依赖。
 
 V1 验收应能在真实变更上找到正确的规则和实现，列清直接修改与仅需验证的范围，并用原文说明理由。当前单工作线程且无账号隔离，适合受控 PoC。进入更广泛的部署前需验证授权、数据隔离、审计和容量。 [项目资料评估](poc-acceptance.md#项目资料上的评估)
@@ -45,8 +45,8 @@ V1 验收应能在真实变更上找到正确的规则和实现，列清直接�
 
 | 顺序 | 入口 | 看什么 |
 | --- | --- | --- |
-| 1 | [analyzer.py](../dhub/analyzer.py) | LangGraph 节点、状态流和补查条件边 |
-| 2 | [main.py](../dhub/agents/main.py) · [domain.py](../dhub/agents/domain.py) · [code.py](../dhub/agents/code.py) | 三个角色如何传递发现，离线示例如何运行 |
+| 1 | [analyzer.py](../dhub/analyzer.py) | 聊天、影响分析、快照和截止时间入口 |
+| 2 | [main.py](../dhub/agents/main.py) · [planning.py](../dhub/planning.py) · [domain.py](../dhub/agents/domain.py) · [code.py](../dhub/agents/code.py) | 主 Agent 的 LangGraph 循环、计划校验、调查交接和离线示例 |
 | 3 | [agent_runtime.py](../dhub/agent_runtime.py) · [prompts](../dhub/prompts/) | 原生工具调用、预算、Trace、角色提示词和六阶段基线 |
 | 4 | [sources.py](../dhub/sources.py) · [工具源码索引](expected-tools.md#7-source-code-mapping) | 如何绑定资料版本、查规则和代码、生成原文证据 |
 | 5 | [report.py](../dhub/report.py) · [app.py](../dhub/app.py) · [store.py](../dhub/store.py) · [static](../dhub/static/) | 报告校验、API、存储与页面回放 |

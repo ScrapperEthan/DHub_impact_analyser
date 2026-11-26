@@ -10,15 +10,16 @@ class CodeInvestigator:
         self.tools = runtime.sources.code.toolset()
 
     def run(self, state: State, parent_span: str, task: dict | None = None) -> dict:
-        stage = "代码补查" if task else "调查代码实现"
-        with self.runtime.agent_span(self.agent_id, stage, parent_span) as span:
+        stage = "Code follow-up" if state.get("code") else "Inspect implementation"
+        with self.runtime.agent_span(self.agent_id, stage, parent_span, task) as span:
             if self.runtime.offline:
                 return self.run_offline(state, span, bool(task))
             return self.runtime.investigate(
                 self.agent_id, span, stage, load_system_prompt("code.md"), self.tools,
                 {
                     "requirement": state["requirement"], "plan": state["plan"], "task": task,
-                    "domain_findings": state.get("domain", []), "snapshot": self.runtime.snapshot,
+                    "domain_findings": state.get("domain", []), "code_findings": state.get("code", []),
+                    "snapshot": self.runtime.snapshot,
                 },
             )
 
@@ -26,9 +27,9 @@ class CodeInvestigator:
         def tool(name, **kwargs):
             return self.runtime.call_tool(self.agent_id, span, self.tools, name, kwargs)
 
-        if not state["plan"]["demo_case"]:
+        if not state["demo_case"]:
             tool("search_code", query=state["requirement"][:160])
-            return {"coverage": "离线模式执行了源查询，固定演示场景以外的结论需配置模型。"}
+            return {"coverage": "Searched the demo repositories. A model gateway is required to analyze other requests."}
         if follow_up:
             prior = state["code"][0].get("graph", {})
             if prior.get("next_offset") is not None and prior.get("result_id"):
@@ -36,7 +37,7 @@ class CodeInvestigator:
             tool("read_file", repo_id="fixture-decision", path="config/global_settings.json")
             tool("read_file", repo_id="fixture-decision", path="tests/test_frequency.py")
             tool("read_file", repo_id="fixture-channel", path="channel/delivery.py")
-            return {"coverage": "补查配置、已有测试及下游消费点"}
+            return {"coverage": "Checked configuration, existing tests, and downstream consumers."}
         for repo_id in ("fixture-decision", "fixture-channel"):
             tool("get_repository_metadata", repo_id=repo_id)
         tool("search_code", query="should_allow_campaign")

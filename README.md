@@ -1,18 +1,18 @@
 # DHub Process Impact Analyser V0
 
-Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具调用和结构化影响报告。默认演示使用合成的 Confluence 页面、两个示例仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
+Business 或 Developer 输入拟议变更，网页实时显示调查步骤和计划，完成后呈现结构化影响报告。默认演示使用合成的 Confluence 页面、两个示例仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
 
 ## 当前 V0 工作流
 
-每次运行先绑定 Confluence 文档快照和 Git 提交。LangGraph 随后按 **Main 规划 → Domain 查业务规则 → Code 查实现 → Main 综合 → 影响报告** 的顺序执行。
+在线聊天和影响分析共用 **Main Agent、Adaptive Planning、调查派单和证据登记**。每次运行先绑定 Confluence 文档快照和 Git 提交。主 Agent 可以直接答复、按需调查，或用 `update_plan` 建立显式计划。发现新的范围或证据缺口时，可以在当次运行内创建、扩展或修订计划，并继续使用已有发现。聊天交付自然语言回复，影响分析交付经过结构和证据引用校验的报告。
 
-Code 首轮直接使用 Domain findings 和初始计划。双方首轮完成后，Main 在综合阶段可按证据缺口选择 Domain 或 Code 补查一次，预算允许时执行，再回到 Main 综合。目标流程还会在首次 Code 调查前由 Main 根据业务发现细化验证任务，这个独立步骤待实现。 [当前流程图与对照](docs/agent-spec.md#当前-v0-运行流程) · [Expected Workflow](docs/expected-workflow.md#3-expected-workflow) · [LangGraph 源码](dhub/analyzer.py)
+每次分析或聊天请求最多执行 50 次资料工具调用。主 Agent 派单单独计数，上限 50 次，每次派单最多执行 8 次资料工具调用。计划更新有独立预算。运行时限从准备快照开始计算，默认且最高 5 分钟。分析若因预算或超时受限，报告会保留已读取的证据并说明缺口。 [当前流程与预算](docs/agent-spec.md#当前-v0-运行流程) · [LangGraph 源码](dhub/agents/main.py)
 
 ## 三个 Agent 和提示词
 
 | Agent | 实现 | 模型提示词 | 工具定义 |
 | --- | --- | --- | --- |
-| Main Process Impact Analyser | [dhub/agents/main.py](dhub/agents/main.py) | [需求规划](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md) | — |
+| Main Process Impact Analyser | [dhub/agents/main.py](dhub/agents/main.py) | [共享规划与派单](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md)、[对话](dhub/prompts/main-chat.md) | `investigate_domain`、`investigate_code`、`update_plan` |
 | Domain Knowledge Investigator | [dhub/agents/domain.py](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) | [dhub/tools/domain.py](dhub/tools/domain.py) |
 | Code Investigator | [dhub/agents/code.py](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) | [dhub/tools/code.py](dhub/tools/code.py) |
 
@@ -43,9 +43,15 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 .\.venv\Scripts\python.exe -m pip install --no-index --find-links wheelhouse -r requirements.txt
 ```
 
-打开 [本地页面](http://127.0.0.1:8000/)，点「填入示例」后开始分析。默认 `demo + offline` 由内置场景驱动，工具实际读合成原文与源码。其他需求在离线模式下可执行基础检索并返回覆盖说明，接上模型后可自由输入。
+打开 [本地页面](http://127.0.0.1:8000/)，点击 **Use Example**，再点击 **Run Analysis**。默认 `demo + offline` 由内置场景驱动，工具实际读合成原文与源码。其他需求在离线模式下可执行基础检索并返回覆盖说明，接上模型后可自由输入。页面、计划和影响报告使用英文。
 
-报告应定位 **P5 Step 18 Frequency Cap**。Trace 应出现主 Agent、业务调查、代码调查和代码补查，包含 `read_document`、`read_file`、`codegraph_explore`、`codegraph_read_result` 等实际调用。点击报告证据可定位调用，刷新当前网址可回放同一运行。
+报告应定位 **P5 Step 18 Frequency Cap**。离线样例提供四版调查计划，代码首查后新增配置、回归和下游补查。可用 **Previous Version** 和 **Next Version** 查看任务状态和调整原因。Trace 会显示主 Agent、两类调查和实际工具调用。点击报告证据可定位调用，刷新当前网址可回放同一运行。
+
+### Agent Chat
+
+点击顶部 **Agent Chat** 进入 [聊天页](http://127.0.0.1:8000/chat)。同一个主 Agent 直接回复，也可按问题调用业务或代码调查。每轮对话在回复前实时显示进行中的调查步骤，Agent 发布计划时可查看任务和修订。刷新同一标签页会恢复问答文本，点击 **New Chat** 可重新开始。回复默认使用英文，也可按用户要求使用其他语言。模型最多接收最近 12 轮，并按文本长度裁剪较长的上下文。
+
+默认离线演示可试问 **What is Frequency Cap?**，再追问 **What about Inbound?**。使用下方配置连接现有模型网关后，即可自由聊天和提问。
 
 ## 内网配置
 
@@ -60,7 +66,7 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 | `LLM_MODEL` | 网关上的模型或部署标识。模型需支持 `tools`、`tool_calls`、`role=tool` 和返回 JSON 文本 |
 | `LLM_API_KEY` | 可选 Bearer Token。由内网环境注入，按网关需要填写 |
 | `LLM_TIMEOUT` / `LLM_MAX_TOKENS` | 单次请求超时秒数，默认 40。可选输出 token 上限，填写时发送 `max_tokens` |
-| `DHUB_RUN_TIMEOUT` | 调查及综合的目标时间上限，默认 180 秒。适配器应自行设置调用超时 |
+| `DHUB_RUN_TIMEOUT` | 单次分析或聊天请求的运行时限，默认且最高 300 秒。可配置更短时限 |
 
 `dhub/llm.py` 延续了 MDC Assistant 的 provider dispatch 和 `chat(messages, tools, temperature)` 接口模式。新协议实现 `ChatClient`，返回统一的 `ChatResult`，然后在 `PROVIDERS` 注册。当前适配器发送非流式 Chat Completions。平台专用鉴权和额外响应协议通过新适配器扩展。企业 CA 可通过 HTTPX 支持的 `SSL_CERT_FILE` 配置。[HTTPX 环境变量](https://www.python-httpx.org/environment_variables/)
 
@@ -101,7 +107,7 @@ CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入�
 
 ## 内网验证与排查
 
-可用下面的命令运行本地烟测。测试使用演示资料和回环模拟网关，覆盖离线流程、原生工具调用、证据链接和运行回放。
+可用下面的命令运行本地烟测。测试使用演示资料和模拟网关，覆盖离线流程、多轮调查和聊天、调用与时间预算、报告校验、证据链接和运行回放。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
@@ -110,7 +116,7 @@ CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入�
 - 启动命令仍使用单进程 uvicorn。V0 没有账号隔离，适合本机或经内网接入控制的验证环境。
 - 先打开 `/api/health` 确认数据模式 `data_mode`。提交样例后可在网页查看报告，也可通过 `GET /api/runs/{run_id}` 和 `GET /api/runs/{run_id}/events?after_seq=0` 查询。
 - `partial` 表示有可用输出但调查受限。排查时先查看 Trace 中失败的工具和资料快照，再核对模型是否支持原生工具调用。
-- `DHUB_DB_PATH` 默认是 `.local/runs.sqlite3`。其中保存需求、证据摘要、报告和 Trace。转交内网时复制 `dhub/`、`demo/`、`docs/`、`tests/`、`requirements.txt`、`README.md` 和 `.env.example`。虚拟环境、实际导出、凭证和运行库在目标环境准备。
+- `DHUB_DB_PATH` 默认是 `.local/runs.sqlite3`。其中保存分析需求、证据摘要、报告、Trace 和计划版本。转交内网时复制 `dhub/`、`demo/`、`docs/`、`tests/`、`requirements.txt`、`README.md` 和 `.env.example`。虚拟环境、实际导出、凭证和运行库在目标环境准备。
 - 停止服务用 `Ctrl+C`。将要独立验证的历史请求放入不同数据库文件，便于区分演示和项目运行。
 
 [文档索引与路线图](docs/README.md) · [总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)

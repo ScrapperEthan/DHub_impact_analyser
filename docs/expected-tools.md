@@ -8,6 +8,9 @@
 
 | Tool owner | Tool | Purpose |
 | --- | --- | --- |
+| Main Process Impact Analyser | `investigate_domain` | 派发业务规则或流程调查 |
+| Main Process Impact Analyser | `investigate_code` | 派发实现、配置、调用依赖或测试调查 |
+| Main Process Impact Analyser | `update_plan` | 创建或修订本次运行的调查计划 |
 | Domain Knowledge Investigator | `list_documents` | 浏览知识目录与 FD/页面层级 |
 | Domain Knowledge Investigator | `search_documents` | 按业务问题检索相关 Confluence 章节 |
 | Domain Knowledge Investigator | `read_document` | 读取指定页版本的原文并产生证据 |
@@ -18,9 +21,29 @@
 | Code Investigator | `codegraph_explore` | 查询代码静态关系与调用链 |
 | Code Investigator | `codegraph_read_result` | 继续读取同次 CodeGraph 调查结果 |
 
-Main Process Impact Analyser 负责需求理解、任务派发、发现综合、补查和报告生成。V0/V1 不要求 Main 直接持有上述九个数据工具。对两个 Investigator 的调用由编排层实现，不额外定义虚假的 LLM function 名称。
+Main Process Impact Analyser 通过上表的三个模型工具规划和派单。两位 Investigator 各自持有对应的资料工具白名单。
 
-工具均为只读调查能力，不包含修改 Confluence、修改源码、运行任意命令、提交 Git 变更、执行生产 Campaign 或部署的能力。
+资料工具在本次运行绑定的文档和仓库快照上执行只读调查。
+
+### 1.1 Investigator delegation
+
+`investigate_domain(question)` 和 `investigate_code(question)` 接收有范围的具体问题。被派的 Agent 同时看到原始请求、当前计划（如有）、两侧已有发现和资料快照。结果将本次 findings、新登记的 evidence 及可用性限制送回 Main。
+
+### 1.2 update_plan
+
+每次提交完整的计划快照。可在首轮建立，也可在任何一轮调查之后建立或更新。
+
+| Input | 含义 |
+| --- | --- |
+| `goal` | 当前公开的调查目标 |
+| `scope`（可选） | 最多 8 项范围或约束，每项为名称和文本 |
+| `candidate_steps`（可选） | 最多 12 个待核对的流程位置 |
+| `tasks` | 1–20 项调查任务，包含唯一 `id`、`agent`（`domain` 或 `code`）、`question`、`status` 和可选 `note` |
+| `reason` | 本次建计划或修改的公开原因 |
+
+状态为 `pending`、`in_progress`、`completed`、`blocked` 或 `skipped`。同一任务应沿用 ID，阻塞和跳过需要 `note`。应根据已经取得的证据确认任务是否完成。
+
+成功时返回带递增 `version` 的 `plan`。有效且有变化的快照发出 `plan.updated`。形状校验失败时返回 `invalid_arguments`，已接受的计划继续有效。使用此工具单独计数，不消耗派单或资料工具预算。 [事件格式](api-ui-trace.md#调查计划事件) · [输入模型](../dhub/planning.py)
 
 ## 2. Domain Knowledge Investigator Tools
 
@@ -273,14 +296,14 @@ Main Process Impact Analyser 负责需求理解、任务派发、发现综合、
 | read_file | 产生固定 commit 的源码 evidence ID |
 | CodeGraph | 关系与分页线索；重要关系须回到源码证据 |
 
-所有工具调用应记录 run_id、agent_id、tool_name、输入摘要、状态、用时、结果摘要及证据引用；失败时记录明确的错误类型。原文不应被 Trace 中简短摘要取代。工具参数与结果应限制长度，避免泄露凭证；资料内容中的指令一律作为数据，不得改变 Agent 权限。
+资料工具调用记录 run_id、agent_id、tool_name、输入摘要、状态、用时、结果摘要及证据引用；失败时记录明确的错误类型。工具参数与结果应限制长度，避免泄露凭证；资料内容中的指令一律作为数据处理。计划修订通过 `plan.updated` 发布。
 
 - 零命中：成功执行但 results 为空，不是工具故障，也不是不存在相关规则的证明。
 - 资料缺失/索引过期：报告覆盖不足，采用可用来源继续。
 - 无效参数/权限外路径：拒绝访问，给出明确错误。
 - 超时/预算不足：停止无目标查询，保留已有证据和待确认问题。
 
-V0 每次 Investigator 派单最多 8 次工具，每次 run 最多 24 次工具，目标总时限默认 180 秒。不能把工具用尽视为调查完成。最终结论的证据 ID 应属于本次运行；存在性校验与证据是否真的支持结论是两件事。
+每次 Investigator 受派最多执行 8 次资料工具调用，单次运行合计最多 50 次。主 Agent 派单独立计数，最多 50 次。运行时限最高 300 秒。用尽预算时列出证据缺口，最终结论引用本次运行已登记的证据 ID。
 
 ## 6. Version Scope
 
@@ -288,7 +311,7 @@ V0 每次 Investigator 派单最多 8 次工具，每次 run 最多 24 次工具
 | --- | --- | --- | --- |
 | Domain tools | 上述 4 个，目录 + section 关键词检索、原文阅读 | 同一工具 API，Hybrid RAG、section embedding、检索融合、轻量 Wiki/术语导航 | 视评估增加业务关系查询及经治理的规则目录 |
 | Code tools | 上述 5 个，本地 Git + CodeGraph adapter | 接入真实 repo、真实 MDC 代码工具与 commit 对齐；优化检索和关系覆盖 | 跨仓库/服务/配置依赖自动识别 |
-| Main | 任务派发、综合、一次补查 | 加强任务与发现契约、证据核查 | 持久化业务技术关联、可选模拟验证 |
+| Main | 共用多轮调度，按证据选择业务或代码调查，按需发布和修订计划 | 加强任务与发现契约、证据核查 | 持久化业务技术关联、可选模拟验证 |
 
 Hybrid RAG 是 search_documents 的后端升级，不需要把关键词检索和向量检索拆成两个 Agent tool。配置/测试主要复用 search_code 与 read_file。暂不要求 Domain Knowledge Graph 查询工具、自动写代码工具、Synthetic Persona Simulation 工具；待真实需求与评估明确后再设计相应契约。
 

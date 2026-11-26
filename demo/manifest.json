@@ -3,7 +3,7 @@
     {
       "page_id": "DEMO-FD2",
       "version": "1",
-      "title": "Decisioning Process（演示）",
+      "title": "Decisioning Process (Demo)",
       "feature_drop": "FD2",
       "ancestors": [
         "DecisionHub Demo",
@@ -26,7 +26,7 @@
     {
       "page_id": "DEMO-SETTINGS",
       "version": "1",
-      "title": "Global Settings（演示）",
+      "title": "Global Settings (Demo)",
       "feature_drop": "FD2",
       "ancestors": [
         "DecisionHub Demo",

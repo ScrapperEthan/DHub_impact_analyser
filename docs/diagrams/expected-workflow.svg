@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="560" height="809" viewBox="0 0 560 809" role="img" aria-labelledby="title desc">
   <title id="title">目标调查流程</title>
-  <desc id="desc">先调查业务规则，再由 Main 细化代码任务。Main 综合双方发现，必要时定向补查一次，然后交付影响报告。</desc>
+  <desc id="desc">一条从业务规则切入的调查路径。Main 根据发现细化代码任务，在预算内按需补查，再交付影响报告。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>

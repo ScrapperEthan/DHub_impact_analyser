@@ -11,7 +11,7 @@ Business 或 Developer 输入一条拟议变更，系统调查它会影响 DHub 
 
 输入是一段中英文自然语言。用户可以在原文中写明 Campaign、Channel、Market、Inbound 或 Outbound、Batch 或 Real-time、边界条件及期望行为。若适用范围会改变结论，报告应列出假设或待确认问题。能在已知范围内开展的调查应继续。
 
-常规流程为 **提交需求 → 业务调查 → 代码调查 → 核对并生成报告**。运行中可以查看三个 Agent 的进度和实际工具调用。运行完成后，从报告中的证据可以跳到对应的 Trace 记录。
+提交需求后，Main 根据问题和发现选择业务或代码调查，并在需要时维护显式计划。运行中可以查看三个 Agent 的进度、实际工具调用和计划版本。运行完成后，从报告中的证据可以跳到对应的 Trace 记录。
 
 ## 三个 Agent 的产品职责
 
@@ -21,7 +21,7 @@ Business 或 Developer 输入一条拟议变更，系统调查它会影响 DHub 
 | **Domain Knowledge Investigator** | Confluence 在什么范围、什么版本中定义了哪些规则、例外和决策步骤？后续 Feature Drop 有无相关变更或不同表述？ | 向主 Agent 交付业务发现、原文证据、代码搜索线索和知识缺口 |
 | **Code Investigator** | 项目仓库的指定提交如何实现这些规则？涉及哪些调用方、共享逻辑、配置和现有测试？ | 向主 Agent 交付实现发现、代码证据、依赖关系和待验证项 |
 
-主 Agent 持有精简的 Decision Process Baseline、系统概览和术语表。两位 Investigator 可以在同一次运行内多次搜索和阅读，主 Agent 根据证据缺口安排一轮定向补查。三位 Agent 可以随同一个后端进程运行，分别拥有任务、输出和 Trace 身份。[Agent 职责、工具和知识准备](agent-spec.md)
+主 Agent 持有 Decision Process Baseline、系统概览和术语表。两位 Investigator 可以在同一次运行内多次搜索和阅读，主 Agent 根据证据缺口在预算内继续派单。三位 Agent 随同一个后端进程运行，分别拥有任务、输出和 Trace 身份。[Agent 职责、工具和知识准备](agent-spec.md)
 
 ## DHub 资料与决策基线
 
@@ -50,6 +50,7 @@ DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定�
 | 综合影响 | 评估现有能力是否已支持需求，定位业务和流程影响，调查代码、配置及已有测试，提示规则冲突和可能的下游行为变化 |
 | 用证据交付 | 展示结构化报告、证据、覆盖范围、风险及回归建议。每条已确认影响能定位到本次运行读取的来源 |
 | 可见的工具调用 | 页面显示三个 Agent、每次真实工具调用的状态、参数摘要、结果摘要和用时。刷新同一运行能回看 Trace |
+| 自适应规划 | 聊天与分析可以直接答复、隐式调查或创建显式计划。调查发现可触发规划和补查，用户在运行中能看到步骤与计划版本 |
 | 资料缺失时运行 | 有可用结果时交付部分报告，明确标出资料缺失、工具超时或覆盖不足。演示语料有独立的运行标记 |
 
 **V0 的目标是开发前的只读影响分析。** 输出中的预期行为来自需求与证据推断。完整 Topic Wiki、关键词加向量的混合检索、持久化业务技术关联、Domain Knowledge Graph、跨服务依赖自动识别及 Synthetic Persona 前后对比属于后续候选。混合检索是 V1 的首个检索升级候选，由真实样例暴露的漏检决定投入优先级。
@@ -57,8 +58,8 @@ DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定�
 ## 本轮实现选择
 
 - **知识检索**使用带来源元数据的 Markdown、轻量目录和关键词检索。目录和少量术语别名提供导航，Investigator 通过多轮检索和原文阅读补齐证据。V1 可沿用同一工具接口增加向量检索。
-- **分析后端**建议 Python、FastAPI、LangChain 工具和 LangGraph 状态图。用一个应用承载三个角色与有限的补查循环。LangGraph 支持用共享状态和条件边表达调查顺序。具体模型与接入地址从运行环境配置。[LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
-- **前端**采用单页 UI，显示需求输入、报告和 Trace。PoC 用轮询刷新事件，SQLite 保存运行结果及 Trace，便于本地启动和回放。[API、页面和 Trace](api-ui-trace.md)
+- **分析后端**使用 Python、FastAPI、LangChain 工具和 LangGraph 状态图。聊天与影响分析共用主 Agent，LangGraph 管理派单回流和输出校验。具体模型与接入地址从运行环境配置。[LangGraph Graph API](https://docs.langchain.com/oss/python/langgraph/graph-api)
+- **前端**提供聊天和分析页面，流式更新调查步骤与计划。SQLite 保存分析结果及事件，支持本地回放。 [API、页面和 Trace](api-ui-trace.md)
 
 ## 联调输入
 

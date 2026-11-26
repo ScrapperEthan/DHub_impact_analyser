@@ -1,13 +1,10 @@
-"""Build and execute the LangGraph for one impact-analysis run."""
+"""Run the DHub agents for impact analysis and conversational questions."""
 
 import importlib
 
-from langgraph.graph import END, START, StateGraph
 from langsmith import tracing_context
 
-from .agent_runtime import AgentRuntime, State
-from .agents.code import CodeInvestigator
-from .agents.domain import DomainKnowledgeInvestigator
+from .agent_runtime import TIME_LIMIT, AgentRuntime, RunDeadlineExceeded, run_before_deadline, run_deadline
 from .agents.main import DEMO_REQUIREMENT as DEMO_REQUIREMENT, MainProcessImpactAnalyser
 from .config import Settings
 from .llm import LLMError
@@ -23,58 +20,50 @@ def load_codegraph(spec: str):
     return getattr(importlib.import_module(module), factory)()
 
 
-def _run_workflow(runtime: AgentRuntime, requirement: str) -> dict:
-    main = MainProcessImpactAnalyser(runtime)
-    domain = DomainKnowledgeInvestigator(runtime)
-    code = CodeInvestigator(runtime)
-    investigators = {domain.agent_id: domain, code.agent_id: code}
-    with runtime.agent_span(main.agent_id, "理解需求、派单和综合", "run") as span:
-        def follow_up(state: State) -> dict:
-            task = state["follow_up"]
-            agent = task["agent"]
-            finding = investigators[agent].run(state, span, task)
-            return {agent: [*state.get(agent, []), finding], "follow_up": None, "followed_up": True}
+def _prepare_sources(settings: Settings, deadline: float) -> tuple[Sources, dict]:
+    sources = Sources(
+        data_mode=settings.data_mode,
+        manifest_path=settings.manifest_path,
+        repositories=settings.repositories,
+        codegraph=load_codegraph(settings.codegraph_adapter) if settings.data_mode == "project" else None,
+        deadline=deadline,
+    )
+    return sources, sources.snapshot()
 
-        graph = StateGraph(State)
-        graph.add_node("plan_requirement", main.plan)
-        graph.add_node("investigate_domain", lambda state: {"domain": [domain.run(state, span)]})
-        graph.add_node("investigate_code", lambda state: {"code": [code.run(state, span)]})
-        graph.add_node("synthesize", main.synthesize)
-        graph.add_node("follow_up_investigation", follow_up)
-        graph.add_edge(START, "plan_requirement")
-        graph.add_edge("plan_requirement", "investigate_domain")
-        graph.add_edge("investigate_domain", "investigate_code")
-        graph.add_edge("investigate_code", "synthesize")
-        graph.add_conditional_edges("synthesize", lambda state: "follow_up_investigation" if state.get("follow_up") else END)
-        graph.add_edge("follow_up_investigation", "synthesize")
-        return graph.compile().invoke({"requirement": requirement})["report"]
+
+def _start_runtime(settings: Settings, emit, set_snapshot) -> AgentRuntime:
+    deadline = run_deadline(settings)
+    try:
+        sources, snapshot = run_before_deadline(deadline, _prepare_sources, settings, deadline)
+    except RunDeadlineExceeded:
+        raise LLMError(TIME_LIMIT) from None
+    set_snapshot(snapshot)
+    return AgentRuntime(settings, sources, snapshot, emit, deadline=deadline)
+
+
+def answer_chat(settings: Settings, messages: list[dict], emit=None) -> str:
+    with tracing_context(enabled=False):
+        runtime = _start_runtime(settings, emit or (lambda event: None), lambda snapshot: None)
+        return MainProcessImpactAnalyser(runtime).reply(messages)
 
 
 def analyze(settings: Settings, requirement: str, emit, set_snapshot) -> tuple[str, dict | None, str | None]:
     try:
-        sources = Sources(
-            data_mode=settings.data_mode,
-            manifest_path=settings.manifest_path,
-            repositories=settings.repositories,
-            codegraph=load_codegraph(settings.codegraph_adapter) if settings.data_mode == "project" else None,
-        )
-        snapshot = sources.snapshot()
-        set_snapshot(snapshot)
-        runtime = AgentRuntime(settings, sources, snapshot, emit)
-        knowledge = snapshot.get("knowledge", {})
-        if knowledge.get("status") != "available":
-            runtime.note("Confluence 知识快照不可用。")
-        repositories = snapshot.get("repositories", [])
-        if len(repositories) < 2 or any(repo.get("status") != "available" for repo in repositories):
-            runtime.note("至少有一个代码仓库的快照不可用。")
-        if settings.data_mode == "project" and any(
-            repo.get("status") == "available" and repo.get("codegraph_commit_sha") != repo.get("commit_sha")
-            for repo in repositories
-        ):
-            runtime.note("部分仓库缺少匹配的 CodeGraph 索引，调用关系以可读取的源码为依据。")
         # The app stores its own trace. Keep inherited LangSmith settings out of the run.
         with tracing_context(enabled=False):
-            report = _run_workflow(runtime, requirement)
+            runtime = _start_runtime(settings, emit, set_snapshot)
+            snapshot = runtime.snapshot
+            if snapshot["knowledge"].get("status") != "available":
+                runtime.note("The Confluence snapshot is unavailable.")
+            repositories = snapshot["repositories"]
+            if len(repositories) < 2 or any(repo.get("status") != "available" for repo in repositories):
+                runtime.note("At least one repository snapshot is unavailable.")
+            if settings.data_mode == "project" and any(
+                repo.get("status") == "available" and repo.get("codegraph_commit_sha") != repo.get("commit_sha")
+                for repo in repositories
+            ):
+                runtime.note("Some repositories lack a matching CodeGraph index. Call relationships are based on available source code.")
+            report = MainProcessImpactAnalyser(runtime).analyze(requirement)
         return ("partial" if runtime.limits else "succeeded"), report, None
     except LLMError as exc:
         return "failed", None, str(exc)
