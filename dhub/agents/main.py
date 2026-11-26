@@ -12,7 +12,7 @@ from ..agent_runtime import (
     load_system_prompt,
 )
 from ..llm import LLMError
-from ..planning import OPEN_TASK_STATUSES, InvestigationPlan, PlanTask
+from ..planning import OPEN_TASK_STATUSES, InvestigationPlan, PlanTask, TaskId
 from ..report import Report, ground_report
 from ..tools.registry import build_toolset, define_tool
 from .code import CodeInvestigator
@@ -78,43 +78,71 @@ class MainProcessImpactAnalyser:
         domain = DomainKnowledgeInvestigator(self.runtime)
         code = CodeInvestigator(self.runtime)
         findings: State = {"requirement": requirement, "plan": None, "domain": [], "code": []}
+        task_agents: dict[str, str] = {}
         remaining_delegations = MAX_DELEGATIONS
         remaining_plan_updates = MAX_PLAN_UPDATES
         # A model can return unavailable tools without consuming either tool budget.
         remaining_tool_rounds = MAX_DELEGATIONS + MAX_PLAN_UPDATES
 
-        def investigate(investigator: DomainKnowledgeInvestigator | CodeInvestigator, question: str) -> dict:
+        def investigate(
+            investigator: DomainKnowledgeInvestigator | CodeInvestigator, question: str, task_id: str | None,
+        ) -> dict:
             question = question.strip()
             if not question:
                 raise ValueError("Investigation question is empty")
+            plan = findings["plan"]
+            assignment = {"agent": investigator.agent_id, "question": question}
+            if task_id is not None:
+                task = next((task for task in (plan or {}).get("tasks", []) if task["id"] == task_id), None)
+                if task is None:
+                    return {"error": "unknown_task_id", "message": "Use a task ID from the current plan.", "plan": plan}
+                if task["agent"] != investigator.agent_id:
+                    return {"error": "task_agent_mismatch", "message": "Use the investigator assigned to this task.", "plan": plan}
+                assignment["task_id"] = task_id
+            elif plan is not None:
+                return {"error": "task_id_required", "message": "Include the task ID from the current plan.", "plan": plan}
+
             evidence_start = len(self.runtime.evidence)
-            finding = investigator.run(findings, span, {"agent": investigator.agent_id, "question": question})
+            try:
+                finding = investigator.run(findings, span, assignment)
+            finally:
+                if plan is not None:
+                    plan = self._publish_plan(findings, span, plan)
             findings[investigator.agent_id].append(finding)
             evidence = list(self.runtime.evidence.values())[evidence_start:]
             return {
                 "findings": finding,
                 "evidence": [{**entry, "excerpt": entry["excerpt"][:1200]} for entry in evidence],
                 "limitations": self.runtime.limits,
+                **({"task_id": task_id, "plan": plan} if plan is not None else {}),
             }
 
-        def investigate_domain(question: str) -> dict:
-            """Check DHub business rules, process steps and exceptions in the configured Confluence sources."""
-            return investigate(domain, question)
+        def investigate_domain(question: str, task_id: TaskId | None = None) -> dict:
+            """Check DHub business rules, steps and exceptions. Include task_id when an explicit plan exists."""
+            return investigate(domain, question, task_id)
 
-        def investigate_code(question: str) -> dict:
-            """Check DHub implementation, dependencies, configuration and tests in the configured repositories."""
-            return investigate(code, question)
+        def investigate_code(question: str, task_id: TaskId | None = None) -> dict:
+            """Check DHub code, configuration and tests. Include task_id when an explicit plan exists."""
+            return investigate(code, question, task_id)
 
         def update_plan(
             goal: str, tasks: list[PlanTask], reason: str,
             scope: dict[str, str] | None = None, candidate_steps: list[str] | None = None,
         ) -> dict:
             """Create or replace the full public investigation plan. Return the current version and tasks."""
+            for task in tasks:
+                if self.runtime.safe_text(task.id, 32) != task.id or task_agents.get(task.id, task.agent) != task.agent:
+                    return {
+                        "error": "invalid_task_id", "plan": findings["plan"],
+                        "message": "Use a public, stable task ID. Use a new ID if the assigned investigator changes.",
+                    }
             plan = {
                 "goal": goal, "scope": scope or {}, "candidate_steps": candidate_steps or [],
                 "tasks": [task.model_dump(exclude_none=True) for task in tasks], "reason": reason,
             }
-            return {"plan": self._publish_plan(findings, span, plan)}
+            snapshot = self._publish_plan(findings, span, plan)
+            task_agents.update({task.id: task.agent for task in tasks})
+            return {"plan": snapshot}
 
         investigators = build_toolset(define_tool(investigate_domain), define_tool(investigate_code))
         investigation_schema = [convert_to_openai_tool(definition.tool) for definition in investigators.values()]
@@ -238,12 +266,16 @@ class MainProcessImpactAnalyser:
 
     def _publish_plan(self, state: State, span: str, plan: dict) -> dict:
         safe = self.runtime.safe_text
+        evidence_by_task: dict[str, list[str]] = {}
+        for evidence_id, entry in self.runtime.evidence.items():
+            if "task_id" in entry:
+                evidence_by_task.setdefault(entry["task_id"], []).append(evidence_id)
         public = {
             "goal": safe(plan["goal"], 400),
             "scope": {safe(key, 400): safe(value, 400) for key, value in plan["scope"].items()},
             "candidate_steps": [safe(step, 400) for step in plan["candidate_steps"]],
             "tasks": [
-                {**task, "id": safe(task["id"], 32), "question": safe(task["question"], 400),
+                {**task, "question": safe(task["question"], 400), "evidence_ids": evidence_by_task.get(task["id"], []),
                  **({"note": safe(task["note"], 400)} if "note" in task else {})}
                 for task in plan["tasks"]
             ],
@@ -327,15 +359,21 @@ class MainProcessImpactAnalyser:
                     "candidate_steps": ["P5 Step 18 · Frequency Cap"], "tasks": tasks, "reason": reason,
                 })
 
+        def assignment(index: int) -> dict | None:
+            if not demo_case:
+                return None
+            task = tasks[index]
+            return {"task_id": task["id"], "agent": task["agent"], "question": task["question"]}
+
         show_plan("Start by checking the exemption rule and the code entry points.")
-        state["domain"] = [domain.run(state, span)]
+        state["domain"] = [domain.run(state, span, assignment(0))]
         if demo_case:
             pages = {evidence.get("page_id") for evidence in self.runtime.evidence.values()}
             if {"DEMO-FD2", "DEMO-SETTINGS"} <= pages:
                 tasks[0]["status"] = "completed"
             tasks[1]["status"] = "in_progress"
-            show_plan("The business rule investigation is complete. Next, check the code paths for both channels.")
-        state["code"] = [code.run(state, span)]
+            show_plan("The business rule checks have run. Next, check the code paths for both channels.")
+        state["code"] = [code.run(state, span, assignment(1))]
         if demo_case and self.runtime.has_tool_budget():
             paths = {evidence.get("path") for evidence in self.runtime.evidence.values()}
             if {"decision/frequency.py", "decision/inbound.py", "decision/outbound.py"} <= paths:
@@ -345,7 +383,8 @@ class MainProcessImpactAnalyser:
                 {"id": "T4", "agent": "code", "question": "Check how delivery consumes the Outbound candidate list", "status": "pending"},
             ])
             show_plan("Check whether the configuration and tests cover channel isolation, and how blocking candidates affects delivery.")
-            code.run(state, span, {"agent": "code", "question": "Follow up on callers, configuration, tests, and delivery"})
+            code.run(state, span, assignment(2))
+            code.run(state, span, assignment(3))
             paths = {evidence.get("path") for evidence in self.runtime.evidence.values()}
             if {"config/global_settings.json", "tests/test_frequency.py"} <= paths:
                 tasks[2]["status"] = "completed"

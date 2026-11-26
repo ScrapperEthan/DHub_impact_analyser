@@ -55,7 +55,12 @@ function appendActivity() {
   steps.append(header, list);
   container.append(planHost, steps);
   transcript.append(container);
-  return { container, plan: createPlanView(planHost), steps, trace: createTraceView(list, count) };
+  const trace = createTraceView(list, count);
+  const plan = createPlanView(planHost, id => {
+    steps.open = true;
+    trace.focusEvidence(id);
+  });
+  return { container, plan, steps, trace };
 }
 
 function setStatus(message = "", error = false) {

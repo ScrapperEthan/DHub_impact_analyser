@@ -13,7 +13,7 @@ class CodeInvestigator:
         stage = "Code follow-up" if state.get("code") else "Inspect implementation"
         with self.runtime.agent_span(self.agent_id, stage, parent_span, task) as span:
             if self.runtime.offline:
-                return self.run_offline(state, span, bool(task))
+                return self.run_offline(state, span, task.get("task_id") if task else None)
             return self.runtime.investigate(
                 self.agent_id, span, stage, load_system_prompt("code.md"), self.tools,
                 {
@@ -23,21 +23,23 @@ class CodeInvestigator:
                 },
             )
 
-    def run_offline(self, state: State, span: str, follow_up: bool) -> dict:
+    def run_offline(self, state: State, span: str, task_id: str | None) -> dict:
         def tool(name, **kwargs):
             return self.runtime.call_tool(self.agent_id, span, self.tools, name, kwargs)
 
         if not state["demo_case"]:
             tool("search_code", query=state["requirement"][:160])
             return {"coverage": "Searched the demo repositories. A model gateway is required to analyze other requests."}
-        if follow_up:
+        if task_id == "T4":
+            tool("read_file", repo_id="fixture-channel", path="channel/delivery.py")
+            return {"coverage": "Checked the downstream delivery consumer."}
+        if task_id == "T3":
             prior = state["code"][0].get("graph", {})
             if prior.get("next_offset") is not None and prior.get("result_id"):
                 tool("codegraph_read_result", result_id=prior["result_id"], offset=prior["next_offset"], limit=4)
             tool("read_file", repo_id="fixture-decision", path="config/global_settings.json")
             tool("read_file", repo_id="fixture-decision", path="tests/test_frequency.py")
-            tool("read_file", repo_id="fixture-channel", path="channel/delivery.py")
-            return {"coverage": "Checked configuration, existing tests, and downstream consumers."}
+            return {"coverage": "Checked configuration and existing tests."}
         for repo_id in ("fixture-decision", "fixture-channel"):
             tool("get_repository_metadata", repo_id=repo_id)
         tool("search_code", query="should_allow_campaign")

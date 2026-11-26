@@ -25,7 +25,7 @@ Business 或 Developer 输入一条拟议变更，系统调查它会影响 DHub 
 
 ## DHub 资料与决策基线
 
-DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定推送结果的 Decision Process。可用资料是 Confluence 和一个 Git 仓库，仓库语言构成为 94% Python、4% Shell、2% PowerShell。Confluence 包含 FD1–FD5（Feature Drop 1–5）及 Core Component Documentation 等页面，项目已能通过 Confluence MCP 获取页面、版本、更新时间、更新人、Ancestors 和附件信息，并转换为 Markdown。仓库内可调查源码和存在的配置、接口契约及测试。仓库提交、模块职责和工具覆盖在项目联调时确认。
+DHub 即 DecisionHub，已有资料描述了一套从候选 Campaign 到选定推送结果的 Decision Process。主要实现位于 `decision-engine-instant-decision-svc` 的 `dev` 分支，仓库语言构成为 94% Python、4% Shell、2% PowerShell。Confluence 包含 FD1–FD5（Feature Drop 1–5）及 Core Component Documentation 等页面，项目已能通过 Confluence MCP 获取页面、版本、更新时间、更新人、Ancestors 和附件信息，并转换为 Markdown。仓库内可调查源码和存在的配置、接口契约及测试。仓库提交、模块职责和工具覆盖在项目联调时确认。
 
 以下是从 FD2 Requirements 下的 **Decisioning Process** 页面起步的 Decision Process Baseline。步骤号沿用该页的 21 步编号，可作为初始导航。规则是否适用、代码是否实现以及部署状态，以各自来源和调查范围为准。
 

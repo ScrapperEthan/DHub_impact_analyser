@@ -134,46 +134,29 @@ function evidenceUrl(value) {
   }
 }
 
-function highlightTrace(run, spanId, moveFocus = false) {
-  const row = run.trace.spans.get(spanId)?.row;
-  if (!row) return false;
-  run.highlightedSpan?.classList.remove("trace-highlight");
-  row.classList.add("trace-highlight");
-  row.open = true;
-  run.highlightedSpan = row;
-  if (moveFocus) {
-    row.scrollIntoView({ block: "center" });
-    row.querySelector("summary").focus({ preventScroll: true });
+function openRunEvidence(run, id) {
+  const entry = run.evidenceEntries?.get(id);
+  if (!entry) {
+    run.trace.focusEvidence(id);
+    return;
   }
-  return true;
-}
-
-function evidenceLinks(parent, ids, entries, run) {
-  if (!ids?.length) return;
-  const group = element("div", "evidence-links");
-  for (const id of ids) {
-    const entry = entries.get(id);
-    if (!entry) continue;
-    const button = element("button", "button subtle evidence-link", "Evidence " + id);
-    button.type = "button";
-    button.addEventListener("click", () => {
-      run.highlightedEvidence?.classList.remove("evidence-target");
-      const { evidence, details } = entry;
-      details.open = true;
-      details.classList.add("evidence-target");
-      run.highlightedEvidence = details;
-      details.scrollIntoView({ block: "center" });
-      details.querySelector("summary").focus({ preventScroll: true });
-      highlightTrace(run, evidence.tool_span_id);
-    });
-    group.append(button);
-  }
-  if (group.childElementCount) parent.append(group);
+  run.highlightedEvidence?.classList.remove("evidence-target");
+  const { evidence, details } = entry;
+  details.open = true;
+  details.classList.add("evidence-target");
+  run.highlightedEvidence = details;
+  details.scrollIntoView({ block: "center" });
+  details.querySelector("summary").focus({ preventScroll: true });
+  run.trace.highlightSpan(evidence.tool_span_id);
 }
 
 function renderReport(run, report, sourceSnapshot) {
   const content = document.createDocumentFragment();
   const entries = new Map();
+  run.evidenceEntries = entries;
+  const linkEvidence = (parent, ids) => evidenceLinks(
+    parent, ids?.filter(id => entries.has(id)), id => openRunEvidence(run, id),
+  );
   if (report.summary) content.append(element("p", "lead", report.summary));
 
   for (const evidence of report.evidence ?? []) {
@@ -196,7 +179,7 @@ function renderReport(run, report, sourceSnapshot) {
       const jump = element("button", "button subtle", "View Tool Call");
       jump.type = "button";
       jump.addEventListener("click", () => {
-        const found = highlightTrace(run, evidence.tool_span_id, true);
+        const found = run.trace.highlightSpan(evidence.tool_span_id, true);
         setNotice(found ? "" : "The corresponding tool call is still loading.");
       });
       actions.append(jump);
@@ -214,7 +197,7 @@ function renderReport(run, report, sourceSnapshot) {
       if (support.status) line.append(tag(support.status));
       if (support.reason) line.append(element("span", "text-block", support.reason));
       if (line.childElementCount) group.append(line);
-      evidenceLinks(group, support.evidence_ids, entries, run);
+      linkEvidence(group, support.evidence_ids);
     }
     if (report.assumptions?.length) group.append(formatList(report.assumptions));
   }
@@ -235,7 +218,7 @@ function renderReport(run, report, sourceSnapshot) {
         const related = impact.related_item_ids.map((id) => targets.get(id) || id);
         card.append(element("p", "muted", "Related impacts · " + related.join(", ")));
       }
-      evidenceLinks(card, impact.evidence_ids, entries, run);
+      linkEvidence(card, impact.evidence_ids);
       list.append(card);
     }
     section(content, "Impacts").append(list);
@@ -251,7 +234,7 @@ function renderReport(run, report, sourceSnapshot) {
           card.append(element("p", "text-block", title + " · " + asText(scenario[key])));
         }
       }
-      evidenceLinks(card, scenario.evidence_ids, entries, run);
+      linkEvidence(card, scenario.evidence_ids);
       list.append(card);
     }
     section(content, "Regression Scenarios").append(list);
@@ -367,8 +350,8 @@ function openRun(id, status = "queued") {
     controller: new AbortController(),
     traceEmpty,
     trace: createTraceView(traceBody, traceCount, traceEmpty),
-    plan: createPlanView(planHost),
   };
+  run.plan = createPlanView(planHost, id => openRunEvidence(run, id));
   activeRun = run;
   setTag(statusTag, status, label(statuses, status));
   setTag(modeTag, "", "");

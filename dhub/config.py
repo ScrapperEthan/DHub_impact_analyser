@@ -7,6 +7,7 @@ from dotenv import load_dotenv
 
 ROOT = Path(__file__).resolve().parent.parent
 MAX_RUN_TIMEOUT = 300
+LOCAL_RESPONSES_BASE_URL = "http://127.0.0.1:4141/v1"
 
 
 @dataclass(frozen=True)
@@ -17,6 +18,8 @@ class LLMConfig:
     model: str = ""
     max_tokens: int | None = None
     timeout: float = 40
+    reasoning_effort: str = ""
+    allow_nonloopback: bool = False
 
 
 @dataclass(frozen=True)
@@ -33,16 +36,22 @@ class Settings:
     def from_env(cls) -> "Settings":
         load_dotenv(ROOT / ".env", interpolate=False)
         env = os.environ
+
+        def llm_value(name: str, default: str = "") -> str:
+            return env.get(f"DHUB_LLM_{name}", env.get(f"LLM_{name}", default)).strip()
+
         mode = env.get("DHUB_DATA_MODE", "demo").strip().lower()
         if mode not in {"demo", "project"}:
             raise ValueError("DHUB_DATA_MODE must be demo or project")
-        provider = env.get("LLM_PROVIDER", "offline" if mode == "demo" else "openai_chat").strip().lower()
+        provider = llm_value("PROVIDER", "offline" if mode == "demo" else "openai_chat").lower()
         if mode == "project" and provider == "offline":
             raise ValueError("Project mode requires a configured LLM provider")
-        base_url = env.get("LLM_BASE_URL", "").strip()
-        model = env.get("LLM_MODEL", "").strip()
+        base_url = llm_value("BASE_URL")
+        model = llm_value("MODEL")
         if provider == "openai_chat" and not (base_url and model):
             raise ValueError("Set LLM_BASE_URL and LLM_MODEL for openai_chat")
+        if provider == "local_responses" and not model:
+            raise ValueError("Set DHUB_LLM_MODEL or LLM_MODEL for local_responses")
         manifest = env.get("DHUB_CONFLUENCE_MANIFEST", "").strip()
         repo_config = env.get("DHUB_REPOS_FILE", "").strip()
         repositories = []
@@ -62,8 +71,9 @@ class Settings:
                 ids.add(entry["repo_id"])
                 entry["path"] = str((config_path.parent / entry["path"]).resolve())
         run_timeout = float(env.get("DHUB_RUN_TIMEOUT", str(MAX_RUN_TIMEOUT)))
-        timeout = float(env.get("LLM_TIMEOUT", "40"))
-        max_tokens = int(env["LLM_MAX_TOKENS"]) if env.get("LLM_MAX_TOKENS") else None
+        timeout = float(llm_value("TIMEOUT", "40"))
+        token_limit = llm_value("MAX_TOKENS")
+        max_tokens = int(token_limit) if token_limit else None
         if not (1 <= run_timeout <= 3600 and 1 <= timeout <= 600) or (max_tokens is not None and max_tokens < 1):
             raise ValueError("Check DHUB_RUN_TIMEOUT, LLM_TIMEOUT and LLM_MAX_TOKENS")
         return cls(
@@ -73,5 +83,9 @@ class Settings:
             repositories=repositories,
             codegraph_adapter=env.get("DHUB_CODEGRAPH_ADAPTER", "").strip(),
             run_timeout=min(run_timeout, MAX_RUN_TIMEOUT),
-            llm=LLMConfig(provider, base_url, env.get("LLM_API_KEY", "").strip(), model, max_tokens, timeout),
+            llm=LLMConfig(
+                provider=provider, base_url=base_url, api_key=llm_value("API_KEY"), model=model,
+                max_tokens=max_tokens, timeout=timeout, reasoning_effort=llm_value("REASONING_EFFORT"),
+                allow_nonloopback=llm_value("ALLOW_NONLOOPBACK").lower() in {"1", "true", "yes", "on"},
+            ),
         )

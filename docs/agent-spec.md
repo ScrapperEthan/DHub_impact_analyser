@@ -16,7 +16,7 @@ Main 从工具结果读取最新版本。对于仍有待调查事项的终稿，
 
 ### 多轮调查和交接
 
-`main` 在 `question` 中说明范围、已知发现和待核实问题。`delegate` 执行派单，每个 Investigator 都收到原始需求、当前计划（如有）、快照和两侧已有 findings。任务问题在调查 Trace 中显示。 [共享规划指令](../dhub/prompts/main-plan.md)
+`main` 在 `question` 中说明范围、已知发现和待核实问题，并在显式计划中附上 `task_id`。`delegate` 执行派单，每个 Investigator 都收到原始需求、当前计划（如有）、快照和两侧已有 findings。Trace 记录派单问题和适用的任务 ID。运行时将源文档或代码的读取证据绑定到对应任务，并在计划快照中发布 `evidence_ids`。 [共享规划指令](../dhub/prompts/main-plan.md)
 
 调查结果带着本次新登记的证据返回 `main`。例如，Main 可根据频控规则写出代码任务，调查 `should_allow_campaign` 的 Outbound 分支和 Inbound 调用。发现适用范围仍有缺口时，再派 Domain 核对例外。两种任务模式都可以重复派单。
 

@@ -41,7 +41,7 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 
 `kind` 可为 `process`、`business_rule`、`code`、`configuration`、`test`、`downstream` 或 `conflict`。`effect` 可为 `direct_change`（拟议变更直接触及）、`indirect_effect`（输入输出或依赖可能受影响）或 `verify`（需要进一步核对）。影响项的 `status` 可为 `confirmed`、`potential` 或 `unknown`。`confirmed` 表示该影响有当前资料支持，拟议行为以预期表述。`potential` 写明推断和条件，`unknown` 写清所缺证据。已确认的影响和现有能力判断须有能够打开或定位的证据。
 
-每条证据包含 `evidence_id`、`source_type`、`excerpt` 和 `tool_span_id`。证据 ID 在运行内唯一，`tool_span_id` 指向实际返回该证据的工具调用。来源定位如下。
+每条证据包含 `evidence_id`、`source_type`、`excerpt` 和 `tool_span_id`。证据 ID 在运行内唯一，`tool_span_id` 指向实际返回该证据的工具调用。由显式任务派单收集的证据还带有 `task_id`。来源定位如下。
 
 | 来源类型 | 定位字段 |
 | --- | --- |
@@ -52,7 +52,7 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 
 ## Trace 事件
 
-服务端在执行边界记录事件。真实工具执行开始时写入 `tool.started`，结束时写入 `tool.finished`，两者共享 `span_id`。超时和失败在结束事件中展示。每次 Investigator 派单记录为主 Agent 下的 `agent.started` 和 `agent.finished`，并在 `input_summary.question` 保存经过裁剪的派单问题。
+服务端在执行边界记录事件。真实工具执行开始时写入 `tool.started`，结束时写入 `tool.finished`，两者共享 `span_id`。超时和失败在结束事件中展示。每次 Investigator 派单记录为主 Agent 下的 `agent.started` 和 `agent.finished`，`input_summary.question` 保存派单问题，`input_summary.task_id` 保存有关联的计划任务 ID。
 
 | 字段或规则 | 用途 |
 | --- | --- |
@@ -86,7 +86,7 @@ Trace 的可见内容限于执行事实和获准展示的业务摘要。服务�
 
 ## 调查计划事件
 
-当 Main 接受新计划或修订时，`plan.updated` 携带完整的计划快照。其 `span_id` 指向所属 Main，版本从 1 开始，在该次请求内递增。前端收到后更新调查计划，并可以回看早期版本。采用直接答复或隐式规划时，页面随实际调用展示 Trace。
+接受新计划、修订计划或新增任务证据时，`plan.updated` 携带完整快照。其 `span_id` 指向所属 Main，版本从 1 开始，在该次请求内递增。每个任务的 `evidence_ids` 来自本次运行实际登记的证据。历史事件可能缺少该字段。采用直接答复或隐式规划时，页面随实际调用展示 Trace。
 
 ```json
 {
@@ -99,9 +99,9 @@ Trace 的可见内容限于执行事实和获准展示的业务摘要。服务�
     "scope": {"Affected channel": "Outbound", "Regression scope": "Existing Inbound behavior"},
     "candidate_steps": ["P5 Step 18 · Frequency Cap"],
     "tasks": [
-      {"id": "T1", "agent": "domain", "question": "Verify the exemption rule", "status": "completed"},
-      {"id": "T2", "agent": "code", "question": "Check the shared implementation", "status": "completed"},
-      {"id": "T3", "agent": "code", "question": "Review configuration and regression assertions", "status": "in_progress"}
+      {"id": "T1", "agent": "domain", "question": "Verify the exemption rule", "status": "completed", "evidence_ids": ["E1"]},
+      {"id": "T2", "agent": "code", "question": "Check the shared implementation", "status": "completed", "evidence_ids": ["E2", "E3"]},
+      {"id": "T3", "agent": "code", "question": "Review configuration and regression assertions", "status": "in_progress", "evidence_ids": []}
     ],
     "reason": "Both channels use the same implementation. Check whether the change can be isolated to Outbound."
   }
@@ -115,5 +115,5 @@ Trace 的可见内容限于执行事实和获准展示的业务摘要。服务�
 - **输入区**提供 **Change Request** 文本框、**Use Example** 和 **Run Analysis**。创建运行后显示当前状态和资料模式。
 - **报告区**把摘要和适用范围放在前面，随后展示影响项、风险或冲突、回归建议和待确认项。用 **Evidence-backed**、**Potential** 和 **Unverified** 标识证据状态。点击一条证据可查看来源定位，并高亮对应工具调用。
 - **Trace 区**按时间显示三个 Agent 的任务和下挂的工具调用。角色用名称、颜色和缩进识别，例如主 Agent 用蓝、业务调查用紫、代码调查用绿。每行显示工具名、状态和时间或耗时，展开后可看到参数摘要、命中数、证据 ID 和错误摘要。
-- **调查计划**展示版本、完成计数、范围、候选步骤、任务状态和修订原因。用 **Previous Version** 和 **Next Version** 回看变化。聊天页在对应消息下显示该轮调查步骤和计划。
+- **调查计划**展示版本、完成计数、范围、候选步骤、任务状态、修订原因和证据链接。用 **Previous Version** 和 **Next Version** 回看变化。聊天页的证据链接指向对应工具调用。
 - **布局**桌面用报告与调查双栏，窄屏上下堆叠。逐事件更新进度，终态可滚动和展开。部分结果和失败保留相应说明，用户可以修改输入再次发起运行。

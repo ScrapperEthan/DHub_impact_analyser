@@ -79,7 +79,19 @@ async function readEventStream(response, onEvent) {
   }
 }
 
-function createPlanView(host) {
+function evidenceLinks(parent, ids, openEvidence) {
+  if (!ids?.length) return;
+  const group = element("div", "evidence-links");
+  for (const id of ids) {
+    const button = element("button", "button subtle evidence-link", "Evidence " + id);
+    button.type = "button";
+    button.addEventListener("click", () => openEvidence(id));
+    group.append(button);
+  }
+  parent.append(group);
+}
+
+function createPlanView(host, openEvidence) {
   const panel = element("details", "investigation-plan");
   panel.open = true;
   const summary = element("summary");
@@ -118,6 +130,7 @@ function createPlanView(host) {
         element("p", "muted plan-context", `${task.id} · ${label(roles, task.agent)}`),
       );
       if (task.note) description.append(element("p", "plan-note", task.note));
+      evidenceLinks(description, task.evidence_ids, openEvidence);
       row.append(description, tag(task.status, taskStatuses));
       tasks.append(row);
     }
@@ -162,6 +175,8 @@ function addTraceDetail(parent, title, value) {
 
 function createTraceView(list, count, placeholder) {
   const spans = new Map();
+  const evidenceSpans = new Map();
+  let highlightedSpan;
   let toolCount = 0;
 
   function createRow(event) {
@@ -190,7 +205,10 @@ function createTraceView(list, count, placeholder) {
       spans.set(event.span_id, span);
     }
     if (event.type.endsWith(".started")) span.started = event;
-    if (event.type.endsWith(".finished")) span.finished = event;
+    if (event.type.endsWith(".finished")) {
+      span.finished = event;
+      for (const id of event.output_summary?.evidence_ids ?? []) evidenceSpans.set(id, event.span_id);
+    }
     const current = span.finished || span.started;
     const agentId = current.agent_id || span.started?.agent_id;
     const agentName = label(roles, agentId);
@@ -219,5 +237,22 @@ function createTraceView(list, count, placeholder) {
     }
   }
 
-  return { spans, render };
+  function highlightSpan(spanId, moveFocus = false) {
+    const row = spans.get(spanId)?.row;
+    if (!row) return false;
+    highlightedSpan?.classList.remove("trace-highlight");
+    row.classList.add("trace-highlight");
+    row.open = true;
+    highlightedSpan = row;
+    if (moveFocus) {
+      row.scrollIntoView({ block: "center" });
+      row.querySelector("summary").focus({ preventScroll: true });
+    }
+    return true;
+  }
+
+  return {
+    spans, render, highlightSpan,
+    focusEvidence: id => highlightSpan(evidenceSpans.get(id), true),
+  };
 }

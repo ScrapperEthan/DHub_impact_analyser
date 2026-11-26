@@ -45,7 +45,7 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 
 打开 [本地页面](http://127.0.0.1:8000/)，点击 **Use Example**，再点击 **Run Analysis**。默认 `demo + offline` 由内置场景驱动，工具实际读合成原文与源码。其他需求在离线模式下可执行基础检索并返回覆盖说明，接上模型后可自由输入。页面、计划和影响报告使用英文。
 
-报告应定位 **P5 Step 18 Frequency Cap**。离线样例提供四版调查计划，代码首查后新增配置、回归和下游补查。可用 **Previous Version** 和 **Next Version** 查看任务状态和调整原因。Trace 会显示主 Agent、两类调查和实际工具调用。点击报告证据可定位调用，刷新当前网址可回放同一运行。
+报告应定位 **P5 Step 18 Frequency Cap**。离线样例提供四版调查计划，代码首查后新增配置、回归和下游补查。可用 **Previous Version** 和 **Next Version** 查看任务状态和调整原因。点击任务的 **Evidence E1** 等链接可查看证据及其工具调用，刷新当前网址可回放同一运行。
 
 ### Agent Chat
 
@@ -55,20 +55,23 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 
 ## 内网配置
 
-从 `.env.example` 复制一份 `.env`。进程环境变量优先于文件。先用 `DHUB_DATA_MODE=demo` 和 `LLM_PROVIDER=openai_chat` 验证网关的原生工具调用。配置下文的文档导出和仓库后，再将 `DHUB_DATA_MODE` 设为 `project`。项目模式需要模型网关。
+首次配置可从 `.env.example` 创建 `.env`。同名配置以进程环境变量为准。先用 `DHUB_DATA_MODE=demo` 及所选 provider 验证原生工具调用。配置文档导出和仓库后，可将 `DHUB_DATA_MODE` 设为 `project`。项目模式需要模型网关。
 
 ### 模型网关
 
 | 配置项 | 值与含义 |
 | --- | --- |
-| `LLM_PROVIDER` | `openai_chat`。V0 使用 Chat Completions 协议，默认演示值为 `offline` |
-| `LLM_BASE_URL` | 内网 API 根地址，保留网关要求的版本路径，例如 `https://gateway.example/v1`。也支持完整的 `/chat/completions` 地址 |
-| `LLM_MODEL` | 网关上的模型或部署标识。模型需支持 `tools`、`tool_calls`、`role=tool` 和返回 JSON 文本 |
+| `LLM_PROVIDER` | `offline` 用于合成演示。`local_responses` 用于 Responses 网关。`openai_chat` 用于 Chat Completions 网关 |
+| `LLM_BASE_URL` | `local_responses` 默认为 `http://127.0.0.1:4141/v1`。两种在线 provider 均可填写含版本路径的根地址或完整的协议端点 |
+| `DHUB_LLM_MODEL` / `LLM_MODEL` | 填网关目录中可用、支持原生工具调用的模型或部署名。优先使用 DHub 专用值，避免继承其他应用的旧模型 |
 | `LLM_API_KEY` | 可选 Bearer Token。由内网环境注入，按网关需要填写 |
-| `LLM_TIMEOUT` / `LLM_MAX_TOKENS` | 单次请求超时秒数，默认 40。可选输出 token 上限，填写时发送 `max_tokens` |
+| `LLM_TIMEOUT` / `LLM_MAX_TOKENS` | 单次请求超时秒数，默认 40。输出上限分别映射为 Chat Completions 的 `max_tokens` 和 Responses 的 `max_output_tokens` |
+| `LLM_REASONING_EFFORT` | 可选。使用网关支持的取值，分别映射为 `reasoning_effort` 和 `reasoning.effort` |
 | `DHUB_RUN_TIMEOUT` | 单次分析或聊天请求的运行时限，默认且最高 300 秒。可配置更短时限 |
 
-`dhub/llm.py` 延续了 MDC Assistant 的 provider dispatch 和 `chat(messages, tools, temperature)` 接口模式。新协议实现 `ChatClient`，返回统一的 `ChatResult`，然后在 `PROVIDERS` 注册。当前适配器发送非流式 Chat Completions。平台专用鉴权和额外响应协议通过新适配器扩展。企业 CA 可通过 HTTPX 支持的 `SSL_CERT_FILE` 配置。[HTTPX 环境变量](https://www.python-httpx.org/environment_variables/)
+所有 `LLM_*` 设置均可用 `DHUB_LLM_*` 覆盖。网关由配置显式选择。模型不可用时可查本机网关的 `/models` 或 `/v1/models`，把目录中的模型名填入 `DHUB_LLM_MODEL`。
+
+两个在线适配器在 [dhub/llm.py](dhub/llm.py) 统一返回 `ChatResult`。Responses 保留工具调用 ID、工具返回和 reasoning 项用于后续轮次，并发送 `store=false`。本机 Responses 直连可用。使用非回环地址时须配置 HTTPS、API key 和 `LLM_ALLOW_NONLOOPBACK=true`。企业 CA 可用 `SSL_CERT_FILE`，Chat Completions 支持 HTTPX 的环境代理。[HTTPX 环境变量](https://www.python-httpx.org/environment_variables/)
 
 ### 导入 Confluence
 
@@ -91,23 +94,25 @@ def pull_pages(*, space_key: str, root_page_ids: list[str]) -> Iterable[Confluen
 
 ### 接入项目仓库
 
-在内网准备项目仓库的本地 Git checkout。创建 `data/repositories.json`，按实际路径和用于验证的版本填写。相对路径按该 JSON 所在目录解析。
+Decision Process 的主要实现位于 `decision-engine-instant-decision-svc` 的 `dev` 分支。在内网准备该仓库的本地 Git checkout，并在 `data/repositories.json` 填写实际路径。相对路径按该 JSON 所在目录解析。
 
 ```json
 [
-  {"repo_id": "dhub", "path": "D:/dhub/project-checkout", "ref": "main"}
+  {"repo_id": "decision-engine-instant-decision-svc", "path": "D:/dhub/decision-engine-instant-decision-svc", "ref": "dev"}
 ]
 ```
 
-将 `DHUB_REPOS_FILE` 指向配置文件。`ref` 可以是 branch、tag 或 commit，未填时为 `HEAD`。每次分析开始时解析固定提交，然后从版本对象只读搜索与读取，不需要 checkout 其他分支。
+将 `DHUB_REPOS_FILE` 指向配置文件。若本地只有远程跟踪分支，可填 `"ref": "origin/dev"`。`ref` 也接受 tag 或 commit，未填时为 `HEAD`。每次分析开始时解析固定提交，然后从版本对象只读搜索与读取。
 
-项目仓库的语言构成为 94% Python、4% Shell、2% PowerShell。单仓库配置可用于联调。当前覆盖检查按两个仓库判断，因此单仓库成功产出报告时仍会标为 `partial`。Git 搜索和文件读取的扩展名白名单暂未包含 `.sh` 和 `.ps1`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
+单仓库配置适用于项目模式。报告按已配置来源和实际可用性说明覆盖范围。Git 搜索和文件读取支持 UTF-8 的 `.sh` 和 `.ps1`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
 
 CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入。工厂返回满足 [CodeGraphAdapter](dhub/repositories.py) 的对象，接入内网版本的索引查询。`indexed_commit(repo_id)` 返回索引覆盖的提交，`explore(repo_id=..., commit_sha=..., query=...)` 返回可序列化的关系记录数组。后端验证索引与本次提交匹配并提供窗口读取。缺少匹配索引时可以用搜索和带行号的文件阅读继续核实，并在报告中说明覆盖缺口。
 
 ## 内网验证与排查
 
 可用下面的命令运行本地烟测。测试使用演示资料和模拟网关，覆盖离线流程、多轮调查和聊天、调用与时间预算、报告校验、证据链接和运行回放。
+
+`requirements.txt` 固定 LangGraph `1.0.10`、LangChain Core `1.2.31` 及配套的 checkpoint、prebuilt、SDK 和 LangSmith 版本。本地干净环境已验证依赖解析和安装。内网使用目标镜像安装后，可运行 `python -m pip check` 核对该环境。
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v

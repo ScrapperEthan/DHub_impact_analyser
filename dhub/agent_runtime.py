@@ -39,7 +39,7 @@ class RunDeadlineExceeded(TimeoutError):
 def load_system_prompt(*names: str) -> str:
     return "\n\n".join(
         (PROMPT_DIR / filename).read_text(encoding="utf-8").strip()
-        for filename in ("common.md", *names)
+        for filename in ("common.md", "glossary.md", *names)
     )
 
 
@@ -113,6 +113,7 @@ class AgentRuntime:
         self.limits: list[str] = []
         self.tool_count = 0
         self.span_count = 0
+        self._span_tasks: dict[str, str] = {}
 
     def has_tool_budget(self) -> bool:
         return self.tool_count < MAX_RUN_TOOLS and self.remaining() > 0
@@ -154,9 +155,11 @@ class AgentRuntime:
         start = monotonic()
         meta = {"agent_id": agent, "stage": stage, "span_id": span, "parent_span_id": parent}
         if task:
-            meta["input_summary"] = self.trace_input(task, ("question",))
+            meta["input_summary"] = self.trace_input(task, ("question", "task_id"))
         previous_limits = len(self.limits)
         self.emit({**meta, "type": "agent.started", "status": "running"})
+        if task and task.get("task_id"):
+            self._span_tasks[span] = task["task_id"]
         status = "succeeded"
         try:
             yield span
@@ -164,17 +167,20 @@ class AgentRuntime:
             status = "failed"
             raise
         finally:
+            self._span_tasks.pop(span, None)
             if status == "succeeded" and len(self.limits) > previous_limits:
                 status = "partial"
             self.emit({**meta, "type": "agent.finished", "status": status, "elapsed_ms": int((monotonic() - start) * 1000)})
 
-    def record_evidence(self, evidence: dict, span: str) -> str:
+    def record_evidence(self, evidence: dict, span: str, agent_span: str) -> str:
         evidence_id = f"E{len(self.evidence) + 1}"
+        task_id = self._span_tasks.get(agent_span)
         self.evidence[evidence_id] = {
             **evidence,
             "evidence_id": evidence_id,
             "tool_span_id": span,
             "excerpt": self.safe_text(evidence["excerpt"], 12000),
+            **({"task_id": task_id} if task_id is not None else {}),
         }
         return evidence_id
 
@@ -212,7 +218,7 @@ class AgentRuntime:
             result = run_before_deadline(self.deadline, definition.tool.invoke, arguments)
             evidence = definition.evidence_factory(result) if definition.evidence_factory else None
             if evidence:
-                evidence_id = self.record_evidence(evidence, span)
+                evidence_id = self.record_evidence(evidence, span, parent)
                 result = {**result, "evidence_ids": [evidence_id]}
                 output["evidence_ids"] = [evidence_id]
             for key in ("results", "lines"):

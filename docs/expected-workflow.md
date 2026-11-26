@@ -188,14 +188,14 @@ Domain / Code 的每条事实应携带 evidence_ids。Graph State 或单次运�
 
 `analyzer` 先由 `Sources` 绑定快照，再调用主 Agent。在线聊天和分析都进入 `MainProcessImpactAnalyser._run_online` 的 `main` 和 `delegate` 节点。 [analyzer.py](../dhub/analyzer.py) · [main.py](../dhub/agents/main.py)
 
-项目模式可配置一个仓库。当前 `analyze` 仍会在仓库数量少于两个时记录覆盖不足，因此单仓库分析即使成功生成报告，运行状态也会是 `partial`。演示模式仍从两个合成仓库绑定快照。 [analyzer.py](../dhub/analyzer.py) · [配置解析](../dhub/config.py)
+项目模式按已配置来源判断覆盖。Decision Process 调查优先使用 `decision-engine-instant-decision-svc` 的 `dev` 分支快照。缺少已配置来源或匹配的索引时，报告说明缺口。 [analyzer.py](../dhub/analyzer.py) · [配置解析](../dhub/config.py)
 
 | 环节 | V0 节点或函数 | 实际交接 |
 | --- | --- | --- |
 | 固定资料快照 | `analyzer._start_runtime` → `Sources.snapshot` | 绑定文档与代码版本，分析运行将快照写入记录 |
 | 理解、规划与综合 | `main` | 按任务指令理解需求或对话上下文，依据已取得的调查结果决定下一步 |
 | 维护显式计划 | `delegate` → `update_plan` | 校验计划、分配版本，并及时发布快照。Main 通过工具结果得到已保存的计划 |
-| 查业务规则或实现 | `delegate` → `Domain.run` 或 `Code.run` | 派单带具体问题，Investigator 接收当前计划、已有双方 findings 和快照，按需执行只读工具 |
+| 查业务规则或实现 | `delegate` → `Domain.run` 或 `Code.run` | 派单带具体问题，显式计划派单附 `task_id`。Investigator 使用当前计划、双方 findings 和快照执行只读工具 |
 | 继续调查 | `delegate` → `main` | 将 findings 和新证据追加到主 Agent 的工具结果，继续判断是否补查 |
 | 校验并结束 | `main` → `END`，分析再执行 `ground_report` | 聊天返回文本，分析核对结构及证据引用。格式不合约时可再生成一次 |
 
@@ -217,7 +217,7 @@ GET /api/runs/{run_id}/events?after_seq={n}   → 分页读取同一事件序列
 POST /api/chat/stream                       → 当前轮调查事件、计划版本和回复
 ```
 
-FastAPI 以单工作线程排队执行分析，SQLite 保存状态、报告和调查事件。两页在执行期间逐事件读取 Trace 和计划版本，分析页可按游标恢复读取。在线 LLM 模式走 Chat Completions 的原生 `tool_calls`，由 Main 选择调查，LangGraph 管理循环和完成条件。离线模式由脚本执行固定示例。 [Web 与 Trace 契约](api-ui-trace.md)
+FastAPI 以单工作线程排队执行分析，SQLite 保存状态、报告和调查事件。两页在执行期间逐事件读取 Trace 和计划版本，分析页可按游标恢复读取。在线模式使用 Responses 或 Chat Completions 的原生工具调用，由 Main 选择调查，LangGraph 管理循环和完成条件。离线模式由脚本执行固定示例。 [Web 与 Trace 契约](api-ui-trace.md)
 
 ### 6.3 State、Runtime 与证据校验
 

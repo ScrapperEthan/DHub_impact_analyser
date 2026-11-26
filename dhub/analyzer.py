@@ -56,7 +56,9 @@ def analyze(settings: Settings, requirement: str, emit, set_snapshot) -> tuple[s
             if snapshot["knowledge"].get("status") != "available":
                 runtime.note("The Confluence snapshot is unavailable.")
             repositories = snapshot["repositories"]
-            if len(repositories) < 2 or any(repo.get("status") != "available" for repo in repositories):
+            if not repositories:
+                runtime.note("No repository snapshot is configured.")
+            elif any(repo.get("status") != "available" for repo in repositories):
                 runtime.note("At least one repository snapshot is unavailable.")
             if settings.data_mode == "project" and any(
                 repo.get("status") == "available" and repo.get("codegraph_commit_sha") != repo.get("commit_sha")

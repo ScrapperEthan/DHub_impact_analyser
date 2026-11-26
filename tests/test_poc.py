@@ -1,21 +1,25 @@
 import json
 import os
+import subprocess
 import time
 import unittest
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from shutil import which
 from tempfile import TemporaryDirectory
 from threading import Event, Thread
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
 from fastapi.testclient import TestClient
 
 from dhub.agent_runtime import TIME_LIMIT, TOOL_LIMIT, run_deadline
 from dhub.analyzer import DEMO_REQUIREMENT, analyze
 from dhub.app import create_app
 from dhub.config import LLMConfig, Settings
-from dhub.llm import ChatResult
+from dhub.llm import ChatResult, LLMError, LocalResponses
+from dhub.sources import Sources
 
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "dhub" / "prompts"
@@ -146,7 +150,7 @@ class ChatGateway(HTTPServer):
     @staticmethod
     def assert_system_prompt(messages, name):
         assert messages[0]["role"] == "system"
-        files = ("common.md", "main-plan.md", name) if name in {"main-chat.md", "main-report.md"} else ("common.md", name)
+        files = ("common.md", "glossary.md", "main-plan.md", name) if name in {"main-chat.md", "main-report.md"} else ("common.md", "glossary.md", name)
         expected = "\n\n".join(
             (PROMPT_DIR / filename).read_text(encoding="utf-8").strip()
             for filename in files
@@ -330,6 +334,7 @@ class AdaptivePlanningTest(unittest.TestCase):
             if "# Code investigation" in prompt:
                 handoff = json.loads(messages[1]["content"])
                 self.assertEqual(handoff["plan"]["version"], 1)
+                self.assertEqual(handoff["task"]["task_id"], "T2")
                 self.assertEqual(handoff["domain_findings"], [{"evidence_ids": ["E1"]}])
                 if not results:
                     return ChatResult(request_tool("read_file", {
@@ -350,12 +355,31 @@ class AdaptivePlanningTest(unittest.TestCase):
                 message = request_tool("update_plan", plan, index)
             elif index == 3:
                 self.assertEqual(results[-1]["plan"]["version"], 1)
-                message = request_tool("investigate_code", {"question": "核对两个渠道的共享实现"}, index)
-            elif index == 4:
-                self.assertEqual(results[-1]["findings"]["evidence_ids"], ["E2"])
+                question = {"question": "核对两个渠道的共享实现"}
+                message = {"role": "assistant", "content": None, "tool_calls": [
+                    tool_request("investigate_code", question, "missing-task"),
+                    tool_request("investigate_code", {**question, "task_id": "T99"}, "unknown-task"),
+                    tool_request("investigate_code", {**question, "task_id": "T1"}, "wrong-agent"),
+                    tool_request("investigate_code", {**question, "task_id": "T2"}, "valid-task"),
+                ]}
+            elif index == 7:
+                self.assertEqual([result["error"] for result in results[-4:-1]], [
+                    "task_id_required", "unknown_task_id", "task_agent_mismatch",
+                ])
+                delegation = results[-1]
+                self.assertEqual(delegation["findings"]["evidence_ids"], ["E2"])
+                self.assertEqual(delegation["evidence"][0]["task_id"], "T2")
+                self.assertEqual(delegation["plan"]["version"], 2)
+                self.assertEqual(delegation["plan"]["tasks"][1]["status"], "in_progress")
+                self.assertEqual(delegation["plan"]["tasks"][1]["evidence_ids"], ["E2"])
+                message = request_tool("update_plan", {
+                    **revised, "tasks": [domain_task, {**code_task, "evidence_ids": ["E99"]}],
+                }, index)
+            elif index == 8:
+                self.assertEqual(results[-1]["error"], "invalid_arguments")
                 message = request_tool("update_plan", revised, index)
             else:
-                self.assertEqual(results[-1]["plan"]["version"], 2)
+                self.assertEqual(results[-1]["plan"]["version"], 3)
                 if messages[-1]["role"] == "system":
                     self.assertIn("Open task IDs", messages[-1]["content"])
                     checked.append(prompt)
@@ -384,15 +408,166 @@ class AdaptivePlanningTest(unittest.TestCase):
         self.assertIn(follow_up["question"], chat_events[-1]["reply"])
         self.assertEqual(run_events[-1]["status"], "partial")
         self.assertIn(follow_up["question"], " ".join(run["report"]["open_questions"]))
+        implicit, bound = run["report"]["evidence"]
+        self.assertNotIn("task_id", implicit)
+        self.assertEqual((bound["evidence_id"], bound["task_id"]), ("E2", "T2"))
         for events in (chat_events, run_events):
             plans = [event["plan"] for event in events if event["type"] == "plan.updated"]
-            self.assertEqual([plan["version"] for plan in plans], [1, 2, 3])
-            self.assertEqual([len(plan["tasks"]) for plan in plans], [2, 3, 3])
-            self.assertEqual(plans[2]["tasks"][-1]["status"], "blocked")
+            self.assertEqual([plan["version"] for plan in plans], [1, 2, 3, 4])
+            self.assertEqual([len(plan["tasks"]) for plan in plans], [2, 2, 3, 3])
+            self.assertEqual(plans[-1]["tasks"][-1]["status"], "blocked")
+            self.assertEqual([plan["tasks"][1]["evidence_ids"] for plan in plans], [[], ["E2"], ["E2"], ["E2"]])
+            self.assertTrue(all(not plan["tasks"][0]["evidence_ids"] for plan in plans))
+            code_spans = [
+                event for event in events if event["type"].startswith("agent.") and event["agent_id"] == "code"
+            ]
+            self.assertEqual([event["input_summary"]["task_id"] for event in code_spans], ["T2", "T2"])
+            self.assertEqual(sum(event["type"] == "tool.started" for event in events), 2)
             order = [event.get("tool_name", event["type"]) for event in events]
             self.assertLess(order.index("read_document"), order.index("plan.updated"))
             self.assertLess(order.index("plan.updated"), order.index("read_file"))
             self.assertNotIn("test-token", json.dumps(events))
+
+
+class LocalResponsesTest(unittest.TestCase):
+    def test_dhub_model_override_and_endpoint_configuration(self):
+        environment = {
+            "LLM_PROVIDER": "local_responses", "LLM_MODEL": "shared-model", "DHUB_LLM_MODEL": "dhub-model",
+            "LLM_MAX_TOKENS": "400", "DHUB_LLM_MAX_TOKENS": "500", "LLM_REASONING_EFFORT": "low",
+        }
+        with patch("dhub.config.os", SimpleNamespace(environ=environment)), patch("dhub.config.load_dotenv"):
+            config = Settings.from_env().llm
+        self.assertEqual((config.model, config.max_tokens, config.reasoning_effort), ("dhub-model", 500, "low"))
+        self.assertEqual(str(LocalResponses(config).endpoint), "http://127.0.0.1:4141/v1/responses")
+        for url, key, opt_in in (
+            ("https://example.test/v1", "token", False),
+            ("http://example.test/v1", "token", True),
+            ("https://example.test/v1/responses", "", True),
+        ):
+            with self.subTest(url=url, has_key=bool(key), opt_in=opt_in), self.assertRaises(LLMError):
+                LocalResponses(LLMConfig(base_url=url, api_key=key, allow_nonloopback=opt_in))
+
+    def test_responses_round_trips_planned_delegation_and_read_evidence(self):
+        reasoning = {"type": "reasoning", "id": "rs_1", "summary": [], "encrypted_content": "synthetic"}
+        task = {"id": "T1", "agent": "domain", "question": "Verify the exemption", "status": "in_progress"}
+        plan = {"goal": "Verify the Frequency Cap rule", "tasks": [task], "reason": "Check the source."}
+
+        def call(name, call_id, arguments):
+            return {"type": "function_call", "call_id": call_id, "name": name, "arguments": json.dumps(arguments)}
+
+        def output(*items):
+            return httpx.Response(200, json={"status": "completed", "output": items})
+
+        def reply(text):
+            return output({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": text}]})
+
+        def complete(request):
+            self.assertEqual(str(request.url), "http://127.0.0.1:4141/v1/responses")
+            payload = json.loads(request.content)
+            self.assertEqual(payload["reasoning"], {"effort": "low"})
+            self.assertEqual(payload["max_output_tokens"], 1000)
+            self.assertFalse(payload["store"])
+            self.assertNotIn("temperature", payload)
+            self.assertEqual(payload["include"], ["reasoning.encrypted_content"])
+            items = payload["input"]
+            results = [item for item in items if item.get("type") == "function_call_output"]
+            if "# Domain knowledge investigation" in items[0]["content"]:
+                self.assertEqual(json.loads(items[1]["content"])["task"]["task_id"], "T1")
+                if not results:
+                    return output(reasoning, call("read_document", "read-1", {
+                        "page_id": "DEMO-FD2", "version": "1", "section": "Phase 5 / Step 18",
+                    }))
+                self.assertIn(reasoning, items)
+                self.assertEqual(results[-1]["call_id"], "read-1")
+                self.assertEqual(json.loads(results[-1]["output"])["evidence_ids"], ["E1"])
+                return reply(json.dumps({"evidence_ids": ["E1"]}))
+            if not results:
+                schemas = {tool["name"]: tool for tool in payload["tools"]}
+                self.assertEqual(set(schemas), MAIN_TOOLS)
+                schema = schemas["investigate_domain"]
+                self.assertFalse(schema["strict"])
+                self.assertIn("task_id", schema["parameters"]["properties"])
+                self.assertEqual(schema["parameters"]["required"], ["question"])
+                return output(
+                    reasoning, call("update_plan", "plan-1", plan),
+                    call("investigate_domain", "domain-1", {"task_id": "T1", "question": task["question"]}),
+                )
+            self.assertIn(reasoning, items)
+            self.assertEqual([item["call_id"] for item in results[:2]], ["plan-1", "domain-1"])
+            self.assertEqual(json.loads(results[1]["output"])["plan"]["tasks"][0]["evidence_ids"], ["E1"])
+            if len(results) == 2:
+                return output(call("update_plan", "plan-2", {**plan, "tasks": [{**task, "status": "completed"}]}))
+            return reply("See E1 for the rule.")
+
+        config = LLMConfig(provider="local_responses", model="test-model", reasoning_effort="low", max_tokens=1000)
+        model = LocalResponses(config, transport=httpx.MockTransport(complete))
+        with TemporaryDirectory() as directory:
+            settings = Settings(db_path=Path(directory) / "runs.sqlite3", llm=config)
+            with patch("dhub.agent_runtime.create_client", return_value=model), TestClient(create_app(settings)) as client:
+                response = client.post("/api/chat/stream", json={"message": "What is Frequency Cap?"})
+        events = [json.loads(line) for line in response.iter_lines()]
+        self.assertEqual(events[-1]["type"], "chat.completed")
+        self.assertEqual(events[-1]["reply"], "See E1 for the rule.")
+        latest = [event["plan"] for event in events if event["type"] == "plan.updated"][-1]
+        self.assertEqual(latest["tasks"][0], {**task, "status": "completed", "evidence_ids": ["E1"]})
+
+
+class ProjectRepositoryTest(unittest.TestCase):
+    @unittest.skipUnless(which("git"), "Git is required for the project repository test.")
+    def test_single_dev_repository_pins_script_reads_and_covers_the_run(self):
+        repo_id = "decision-engine-instant-decision-svc"
+        with TemporaryDirectory() as directory:
+            repo = Path(directory)
+
+            def git(*args):
+                return subprocess.check_output([
+                    "git", "-C", directory, "-c", "user.name=DHub Test", "-c", "user.email=dhub@example.invalid",
+                    "-c", "commit.gpgsign=false", "-c", f"core.hooksPath={repo / 'no-hooks'}", *args,
+                ], env=os.environ.copy(), text=True).strip()
+
+            git("init", "-q", "-b", "main")
+            scripts = {"run.sh": "# example_decision shell\n", "Deploy.PS1": "# example_decision powershell\n"}
+            for name, text in scripts.items():
+                (repo / name).write_text(text, encoding="utf-8")
+            git("add", "--", *scripts)
+            git("commit", "-qm", "dev script fixtures")
+            dev_revision = git("rev-parse", "HEAD")
+            git("branch", "dev")
+            git("update-ref", "refs/remotes/origin/dev", dev_revision)
+            (repo / "Deploy.PS1").write_text("# working branch\n", encoding="utf-8")
+            git("commit", "-qam", "update main")
+
+            manifest = PROMPT_DIR.parents[1] / "demo" / "manifest.json"
+            repos = [{"repo_id": repo_id, "path": directory, "ref": "dev"}]
+            codegraph = SimpleNamespace(indexed_commit=lambda _repo_id: dev_revision)
+            sources = Sources(data_mode="project", manifest_path=manifest, repositories=repos, codegraph=codegraph)
+            repo_snapshot, = sources.snapshot()["repositories"]
+            self.assertEqual((repo_snapshot["branch"], repo_snapshot["commit_sha"]), ("dev", dev_revision))
+            tracked, = Sources(
+                data_mode="project", manifest_path=manifest, repositories=[{**repos[0], "ref": "origin/dev"}],
+            ).snapshot()["repositories"]
+            self.assertEqual((tracked["branch"], tracked["commit_sha"]), ("origin/dev", dev_revision))
+            self.assertEqual(git("branch", "--show-current"), "main")
+            matches = sources.search_code("example_decision", extensions=["sh", "ps1"])["results"]
+            self.assertEqual({match["path"] for match in matches}, set(scripts))
+            for name, text in scripts.items():
+                source = sources.read_file(repo_id, name)
+                self.assertEqual(source["lines"], [{"line": 1, "text": text.rstrip()}])
+                self.assertEqual(source["commit_sha"], dev_revision)
+
+            config = Settings(
+                data_mode="project", manifest_path=manifest, repositories=repos,
+                llm=LLMConfig(provider="openai_chat"),
+            )
+            response = {"report": {"requirement_summary": "Verify the scripts", "summary": "Fixture report"}}
+            model = SimpleNamespace(chat=lambda *_args, **_kwargs: ChatResult(ChatGateway._json_message(response), {}))
+            with patch("dhub.agent_runtime.create_client", return_value=model):
+                with patch("dhub.analyzer.load_codegraph", return_value=codegraph):
+                    status, report, detail = analyze(config, "Verify the scripts", lambda _: None, lambda _: None)
+                    self.assertEqual((status, report["open_questions"], detail), ("succeeded", [], None))
+                status, report, _ = analyze(config, "Verify the scripts", lambda _: None, lambda _: None)
+                self.assertEqual(status, "partial")
+                self.assertTrue(any("CodeGraph index" in gap for gap in report["open_questions"]))
 
 
 class AgentBudgetTest(unittest.TestCase):
@@ -529,6 +704,17 @@ class PoCTest(unittest.TestCase):
             self.assertEqual([plan["version"] for plan in plans], [1, 2, 3, 4])
             self.assertEqual([len(plan["tasks"]) for plan in plans], [2, 2, 4, 4])
             self.assertTrue(all(task["status"] == "completed" for task in plans[-1]["tasks"]))
+            self.assertEqual([task["evidence_ids"] for task in plans[-1]["tasks"]], [
+                ["E1", "E2"], ["E3", "E4", "E5"], ["E6", "E7"], ["E8"],
+            ])
+            trace = {event["span_id"]: event for event in events if event["type"].endswith(".finished")}
+            evidence_by_id = {entry["evidence_id"]: entry for entry in report["evidence"]}
+            for task in plans[-1]["tasks"]:
+                for evidence_id in task["evidence_ids"]:
+                    entry = evidence_by_id[evidence_id]
+                    self.assertEqual(entry["task_id"], task["id"])
+                    span = trace[entry["tool_span_id"]]["parent_span_id"]
+                    self.assertEqual(trace[span]["input_summary"]["task_id"], task["id"])
             self.assertNotRegex(json.dumps([report, events], ensure_ascii=False), r"[\u3400-\u9fff]")
             tools = {event["tool_name"]: event for event in events if event["type"] == "tool.finished"}
             self.assertEqual(tools["codegraph_explore"]["output_summary"]["result_id"],

@@ -33,17 +33,14 @@ Navigation source: FD2 Requirements → Decisioning Process (21 steps in six pha
 
 The known navigation anchors are P3 Step 9 (score calculation), P5 Step 18 (Frequency Cap), and P6 Step 21 (delivery). Do not assign individual numbers to other topics until the FD2 original is checked. Scoring belongs to P3; ranking using scores belongs to P5. The exact integration point for CEH Eligibility is not established here; investigate it rather than guessing. A later Feature Drop can add, remove or revise rules or steps. Check applicable FD1–FD5 documents and core component documentation; FD number, page version and deployment status are distinct.
 
-### Working business glossary
+### Additional working investigation vocabulary
 
-These descriptions are search and reasoning aids, not authoritative definitions of DHub-specific behaviour.
+Use the separately loaded glossary.md for the screenshot-derived DHub terminology and PEGA CDH mappings. The following supplementary descriptions are search and reasoning aids, not authoritative definitions of DHub-specific behaviour.
 
-- Campaign: a candidate business activity considered by decisioning; check campaign type, eligibility and configured scope.
-- Channel: a delivery or interaction dimension; check channel-specific rules and whether a filter applies across channels.
-- Communication Strategy: a business scope associated with eligibility; investigate its exact relationship with Campaign and Channel.
 - Eligibility: conditions that determine whether a candidate may proceed; investigate the applicable entity, inputs, exceptions and filtering stage.
 - Arbitration Score / Business Value: a value calculated to inform prioritisation. Verify scoring inputs, formula and how the score is consumed separately.
 - Arbitration: selection, prioritisation and conflict resolution among candidates; verify actual ranking and tie-breaking rules.
-- Contact Policy / Suppression Rules: contact permission or exclusion concerns; investigate exact applicability and precedence.
+- Contact Policy / Suppression Rule: consult glossary.md and investigate exact applicability, scope and precedence.
 - Frequency Cap: a fatigue-management concern about contact frequency; confirm counting scope, window, thresholds and exceptions from evidence.
 - Quiet Time, Channel Limit, Mobile Slot Suppression: distinct candidate fatigue/constraint topics; verify each rule and its interaction with other controls.
 - Mandatory Campaign / Allow mandate campaign override: candidate campaign classification and override terminology; check applicable rules and exceptions independently for Frequency Cap and other controls. Do not generalise the synthetic offline example to real DHub.
@@ -62,4 +59,4 @@ Both investigators may return partial findings. Treat missing evidence as unknow
 
 ### Internal-source completion gaps
 
-When maintaining this baseline with authorised internal material, verify the full FD2 21-step mapping, DHub component/system overview, canonical glossary (including CEH and UCG), scope relationships, channel/mode variations and FD3–FD5 changes. Record source page/version/section for each verified addition. Until then, retain uncertainties and use targeted investigation instead of filling gaps with assumptions.
+When maintaining this baseline with authorised internal material, verify the full FD2 21-step mapping, DHub component/system overview, remaining glossary gaps (including CEH and UCG) and the original page ID/version for glossary.md, scope relationships, channel/mode variations and FD3–FD5 changes. Record source page/version/section for each verified addition. Until then, retain uncertainties and use targeted investigation instead of filling gaps with assumptions.

@@ -27,7 +27,7 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 
 ### 1.1 Investigator delegation
 
-`investigate_domain(question)` 和 `investigate_code(question)` 接收有范围的具体问题。被派的 Agent 同时看到原始请求、当前计划（如有）、两侧已有发现和资料快照。结果将本次 findings、新登记的 evidence 及可用性限制送回 Main。
+`investigate_domain(question, task_id=None)` 和 `investigate_code(question, task_id=None)` 接收有范围的具体问题。显式计划中的派单要提供当前计划里属于该 Investigator 的 `task_id`，隐式调查省略它。被派的 Agent 同时看到原始请求、当前计划（如有）、两侧已有发现和资料快照。结果将本次 findings、新登记的 evidence 及可用性限制送回 Main。
 
 ### 1.2 update_plan
 
@@ -43,7 +43,7 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 
 状态为 `pending`、`in_progress`、`completed`、`blocked` 或 `skipped`。同一任务应沿用 ID，阻塞和跳过需要 `note`。应根据已经取得的证据确认任务是否完成。
 
-成功时返回带递增 `version` 的 `plan`。有效且有变化的快照发出 `plan.updated`。形状校验失败时返回 `invalid_arguments`，已接受的计划继续有效。使用此工具单独计数，不消耗派单或资料工具预算。 [事件格式](api-ui-trace.md#调查计划事件) · [输入模型](../dhub/planning.py)
+成功时返回带递增 `version` 的 `plan`。任务的 `evidence_ids` 由运行时从实际证据生成，保留同一任务 ID 的关联。每份有变化的快照发出 `plan.updated`。形状校验失败时返回 `invalid_arguments`，已接受的计划继续有效。此工具使用独立预算。 [事件格式](api-ui-trace.md#调查计划事件) · [输入模型](../dhub/planning.py)
 
 ## 2. Domain Knowledge Investigator Tools
 
@@ -162,9 +162,9 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 
 ![项目仓库固定到一个提交。Git 工具可直接调查固定提交。CodeGraph 索引匹配时可查询和翻页，索引缺失或不匹配时继续使用 Git 搜索与原文。](diagrams/code-snapshot.svg)
 
-- 真实项目使用一个 Git 仓库，语言构成为 94% Python、4% Shell、2% PowerShell。项目模式通过 `DHUB_REPOS_FILE` 配置仓库及 ref。`Repository.pin` 用 `git rev-parse` 和 `git ls-tree` 定位固定提交的 Git 对象，搜索和读取均使用该提交版本。
+- Decision Process 主要实现位于 `decision-engine-instant-decision-svc` 的 `dev` 分支。项目模式通过 `DHUB_REPOS_FILE` 配置仓库及 ref。`Repository.pin` 用 `git rev-parse` 和 `git ls-tree` 定位固定提交的 Git 对象，搜索和读取均使用该提交版本。
 - `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入真实索引适配器。当前已有适配接口和提交校验，MDC 内网客户端、工具签名和返回格式仍待对接验证。索引缺失或过期时，继续搜索并读取源码，在报告记录覆盖缺口。
-- 当前 Git 搜索和阅读通过 `CODE_EXTENSIONS` 筛选文件。典型 Shell 与 PowerShell 扩展名 `.sh`、`.ps1` 尚未纳入允许列表，调查这类变更时要记录覆盖缺口。 [仓库读取实现](../dhub/repositories.py)
+- Git 搜索和阅读通过 `CODE_EXTENSIONS` 筛选文件，包括 UTF-8 的 `.sh` 和 `.ps1` 脚本。 [仓库读取实现](../dhub/repositories.py)
 - 演示的 `fixture-decision` 与 `fixture-channel` 来自合成文件，版本标识为内容哈希，调用关系取自 [codegraph.json](../demo/codegraph.json)。 [仓库接入说明](../README.md#接入项目仓库)
 
 ### 3.1 get_repository_metadata

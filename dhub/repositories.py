@@ -12,7 +12,9 @@ from typing import Protocol
 from .source_utils import SourceError, path_in_source, query_tokens, read_source_text, relative_path
 
 DEMO_ROOT = Path(__file__).resolve().parent.parent / "demo"
-CODE_EXTENSIONS = frozenset({".py", ".pyi", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sql", ".md", ".txt"})
+CODE_EXTENSIONS = frozenset({
+    ".py", ".pyi", ".sh", ".ps1", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sql", ".md", ".txt",
+})
 MAX_CODE_BYTES = 512_000
 MAX_DEMO_GRAPH_BYTES = 8_000_000
 
@@ -99,6 +101,8 @@ class Repository:
                 ).decode("utf-8").strip()
                 if branch.startswith("refs/heads/"):
                     self.branch = branch.removeprefix("refs/heads/")
+                elif branch.startswith("refs/remotes/"):
+                    self.branch = branch.removeprefix("refs/remotes/")
             except (SourceError, ValueError):
                 pass
             tree = self._git("ls-tree", "-r", "-l", "-z", "--full-tree", self.commit_sha)
@@ -158,7 +162,7 @@ class Repository:
             output = self._git(
                 "grep", "--no-textconv", "-I", "-i", "-F", "-n", "-z", "--full-name",
                 f"--max-count={limit}", *args, self.commit_sha, "--",
-                *(f":(glob)**/*{extension}" for extension in sorted(extensions)),
+                *(f":(glob,icase)**/*{extension}" for extension in sorted(extensions)),
                 allow_no_matches=True,
             )
             rows = self._grep_rows(output, prefix, extensions)
