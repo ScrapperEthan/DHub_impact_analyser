@@ -2,20 +2,12 @@
 
 from ..agent_runtime import AgentRuntime, State, load_system_prompt
 
-DOMAIN_TOOLS = {
-    "search_documents": "Find relevant Markdown sections by query and optional scope. Search results are discovery hints.",
-    "list_documents": "Browse available Confluence catalogue entries.",
-    "read_document": "Read an original Markdown section at the specified page version. Use its evidence ID.",
-    "get_document_metadata": "Get authoritative catalogue metadata for a page version.",
-}
-
-
 class DomainKnowledgeInvestigator:
     agent_id = "domain"
 
     def __init__(self, runtime: AgentRuntime):
         self.runtime = runtime
-        self.tools = runtime.bind_tools(DOMAIN_TOOLS)
+        self.tools = runtime.sources.domain.toolset()
 
     def run(self, state: State, parent_span: str, task: dict | None = None) -> dict:
         stage = "业务补查" if task else "调查业务规则"

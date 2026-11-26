@@ -4,13 +4,21 @@ Business 或 Developer 输入拟议变更，网页显示三个 Agent 的工具�
 
 ## 三个 Agent 和提示词
 
-| Agent | 实现 | 模型提示词 |
-| --- | --- | --- |
-| Main Process Impact Analyser | [`dhub/agents/main.py`](dhub/agents/main.py) | [需求规划](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md) |
-| Domain Knowledge Investigator | [`dhub/agents/domain.py`](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) |
-| Code Investigator | [`dhub/agents/code.py`](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) |
+| Agent | 实现 | 模型提示词 | 工具定义 |
+| --- | --- | --- | --- |
+| Main Process Impact Analyser | [dhub/agents/main.py](dhub/agents/main.py) | [需求规划](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md) | — |
+| Domain Knowledge Investigator | [dhub/agents/domain.py](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) | [dhub/tools/domain.py](dhub/tools/domain.py) |
+| Code Investigator | [dhub/agents/code.py](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) | [dhub/tools/code.py](dhub/tools/code.py) |
 
-[LangGraph 入口](dhub/analyzer.py)把三个角色接到需求规划、业务调查、代码调查和报告生成节点。两个 Investigator 在各自文件里声明可调用的工具。模型模式把[共用指令与决策基线](dhub/prompts/common.md)和角色提示词组合后发送给网关。默认离线模式使用内置演示场景。
+[LangGraph 入口](dhub/analyzer.py)依次运行需求规划、业务调查、代码调查和报告生成。模型模式把[共用指令与决策基线](dhub/prompts/common.md)和角色提示词组合后发送给网关。默认离线模式使用内置演示场景。
+
+### 修改或新增工具
+
+业务文档工具集中在 [domain.py](dhub/tools/domain.py)，Git 和 CodeGraph 工具集中在 [code.py](dhub/tools/code.py)。每个工具的方法名、参数类型、默认值和 docstring 对应模型看到的名字、参数和描述。
+
+新增工具时，在所属文件实现方法，再把它加入同一文件的 `toolset()`。用 `trace_fields` 选择 Trace 可展示的参数。需要生成报告证据时，用 `evidence_factory` 提取文档页版本、代码行号等定位字段。
+
+数据加载和 Git 底层操作分别在 [documents.py](dhub/documents.py) 和 [repositories.py](dhub/repositories.py)。[sources.py](dhub/sources.py)为每次分析准备快照，[agent_runtime.py](dhub/agent_runtime.py)统一执行工具、登记证据和记录 Trace。
 
 ## 快速启动
 
@@ -83,7 +91,7 @@ def pull_pages(*, space_key: str, root_page_ids: list[str]) -> Iterable[Confluen
 
 项目仓库的语言构成为 94% Python、4% Shell、2% PowerShell。当前单仓库配置可用于联调，PoC 会将成功产出报告的运行标为 `partial`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
 
-CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入。工厂返回满足 [CodeGraphAdapter](dhub/sources.py) 的对象，接入内网版本的索引查询。`indexed_commit(repo_id)` 返回索引覆盖的提交，`explore(repo_id=..., commit_sha=..., query=...)` 返回可序列化的关系记录数组。后端验证索引与本次提交匹配并提供窗口读取。缺少匹配索引时可以用搜索和带行号的文件阅读继续核实，并在报告中说明覆盖缺口。
+CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入。工厂返回满足 [CodeGraphAdapter](dhub/repositories.py) 的对象，接入内网版本的索引查询。`indexed_commit(repo_id)` 返回索引覆盖的提交，`explore(repo_id=..., commit_sha=..., query=...)` 返回可序列化的关系记录数组。后端验证索引与本次提交匹配并提供窗口读取。缺少匹配索引时可以用搜索和带行号的文件阅读继续核实，并在报告中说明覆盖缺口。
 
 ## 内网验证与排查
 

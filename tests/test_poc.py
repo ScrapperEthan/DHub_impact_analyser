@@ -240,6 +240,13 @@ class PoCTest(unittest.TestCase):
         self.assertEqual(report["current_support"]["evidence_ids"], list(gateway.evidence_ids.values()))
         self.assertEqual({entry["source_type"] for entry in report["evidence"]}, {"confluence", "code"})
         self.assert_grounded_trace(report, events)
+        finished = {event["tool_name"]: event for event in events if event["type"] == "tool.finished"}
+        self.assertEqual(finished["read_document"]["input_summary"], {
+            "page_id": "DEMO-FD2", "version": "1", "section": "Phase 5 / Step 18",
+        })
+        self.assertEqual(finished["read_file"]["input_summary"], {
+            "repo_id": "fixture-decision", "path": "decision/frequency.py",
+        })
         self.assertNotIn("test-token", json.dumps(events))
 
 

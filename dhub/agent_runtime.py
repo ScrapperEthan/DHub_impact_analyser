@@ -10,22 +10,19 @@ from time import monotonic
 from typing import TypedDict
 from uuid import uuid4
 
-from langchain_core.tools import StructuredTool
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
 from .config import Settings
 from .llm import LLMError, create_client
-from .sources import SourceError, Sources
+from .source_utils import SourceError
+from .sources import Sources
+from .tools.registry import ToolDefinition
 
 log = logging.getLogger(__name__)
 PROMPT_DIR = Path(__file__).with_name("prompts")
 MAX_RUN_TOOLS = 24
 MAX_INVESTIGATOR_TOOLS = 8
-TRACE_ARGS = {
-    "query", "feature_drop", "ancestor", "limit", "page_id", "version", "section", "offset",
-    "repo_id", "repo_ids", "path_prefix", "path", "extensions", "start_line", "end_line", "result_id",
-}
 
 
 def load_system_prompt(name: str) -> str:
@@ -76,14 +73,6 @@ class AgentRuntime:
         self.tool_count = 0
         self.span_count = 0
 
-    def bind_tools(self, descriptions: dict[str, str]) -> dict[str, StructuredTool]:
-        return {
-            name: StructuredTool.from_function(
-                func=getattr(self.sources, name), name=name, description=description
-            )
-            for name, description in descriptions.items()
-        }
-
     def has_tool_budget(self) -> bool:
         return self.tool_count < MAX_RUN_TOOLS and self.remaining() > 0
 
@@ -106,10 +95,10 @@ class AgentRuntime:
         value = re.sub(r"(?i)\b((?:api[_-]?key|access[_-]?token|password|secret)\s*[=:]\s*)[^\s,;]+", r"\1[已隐藏]", value)
         return value[:limit]
 
-    def trace_input(self, arguments: dict) -> dict:
+    def trace_input(self, arguments: dict, fields: tuple[str, ...]) -> dict:
         summary = {}
-        for key in TRACE_ARGS.intersection(arguments):
-            value = arguments[key]
+        for key in fields:
+            value = arguments.get(key)
             if isinstance(value, str):
                 summary[key] = self.safe_text(value, 180)
             elif isinstance(value, int):
@@ -136,38 +125,24 @@ class AgentRuntime:
                 status = "partial"
             self.emit({**meta, "type": "agent.finished", "status": status, "elapsed_ms": int((monotonic() - start) * 1000)})
 
-    def collect_evidence(self, name: str, result: dict, span: str) -> str | None:
-        if name == "read_document" and result.get("content"):
-            metadata = result["metadata"]
-            fields = {key: metadata.get(key) for key in ("page_id", "version", "title", "feature_drop", "source_url")}
-            fields["section"] = result.get("section") or "整页"
-            if result.get("offset"):
-                fields["section"] += f" · 字符偏移 {result['offset']}"
-            fields["source_type"] = "confluence"
-            excerpt = result["content"]
-        elif name == "read_file" and result.get("lines"):
-            fields = {key: result.get(key) for key in ("repo_id", "branch", "commit_sha", "path", "start_line", "end_line")}
-            fields["source_type"] = "code"
-            excerpt = "\n".join(f"{line['line']}  {line['text']}" for line in result["lines"])
-        else:
-            return None
+    def record_evidence(self, evidence: dict, span: str) -> str:
         evidence_id = f"E{len(self.evidence) + 1}"
         self.evidence[evidence_id] = {
-            **fields,
+            **evidence,
             "evidence_id": evidence_id,
             "tool_span_id": span,
-            "excerpt": self.safe_text(excerpt, 12000),
+            "excerpt": self.safe_text(evidence["excerpt"], 12000),
         }
         return evidence_id
 
     def call_tool(
-        self, agent: str, parent: str, tools: dict[str, StructuredTool], name: str, arguments: dict
+        self, agent: str, parent: str, tools: dict[str, ToolDefinition], name: str, arguments: dict
     ) -> dict:
         if not self.has_tool_budget():
             self.note("调查达到运行预算。")
             return {"error": "budget_exhausted"}
-        tool = tools.get(name)
-        if tool is None:
+        definition = tools.get(name)
+        if definition is None:
             self.note("模型尝试调用调查任务权限外的工具。")
             return {"error": "unknown_tool"}
         self.tool_count += 1
@@ -175,7 +150,7 @@ class AgentRuntime:
         start = monotonic()
         meta = {
             "agent_id": agent, "tool_name": name, "span_id": span, "parent_span_id": parent,
-            "input_summary": self.trace_input(arguments),
+            "input_summary": self.trace_input(arguments, definition.trace_fields),
         }
         self.emit({**meta, "type": "tool.started", "status": "running"})
         output = {}
@@ -183,11 +158,12 @@ class AgentRuntime:
         error_summary = None
         status = "succeeded"
         try:
-            result = tool.invoke(arguments)
+            result = definition.tool.invoke(arguments)
             if self.remaining() <= 0:
                 raise TimeoutError
-            evidence_id = self.collect_evidence(name, result, span)
-            if evidence_id:
+            evidence = definition.evidence_factory(result) if definition.evidence_factory else None
+            if evidence:
+                evidence_id = self.record_evidence(evidence, span)
                 result = {**result, "evidence_ids": [evidence_id]}
                 output["evidence_ids"] = [evidence_id]
             for key in ("results", "lines"):
@@ -241,14 +217,14 @@ class AgentRuntime:
         span: str,
         stage: str,
         system_prompt: str,
-        tools: dict[str, StructuredTool],
+        tools: dict[str, ToolDefinition],
         data: dict,
     ) -> dict:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": as_json(data)},
         ]
-        tool_schema = [convert_to_openai_tool(tool) for tool in tools.values()]
+        tool_schema = [convert_to_openai_tool(definition.tool) for definition in tools.values()]
         count = 0
         try:
             for _ in range(MAX_INVESTIGATOR_TOOLS + 1):

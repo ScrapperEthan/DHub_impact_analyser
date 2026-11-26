@@ -141,7 +141,7 @@ Main Process Impact Analyser 负责需求理解、任务派发、发现综合、
 
 - 真实项目使用一个 Git 仓库，语言构成为 94% Python、4% Shell、2% PowerShell。项目模式通过 `DHUB_REPOS_FILE` 配置仓库及 ref。`Repository.pin` 用 `git rev-parse` 和 `git ls-tree` 定位固定提交的 Git 对象，搜索和读取均使用该提交版本。
 - `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入真实索引适配器。当前已有适配接口和提交校验，MDC 内网客户端、工具签名和返回格式仍待对接验证。索引缺失或过期时，继续搜索并读取源码，在报告记录覆盖缺口。
-- 当前 Git 搜索和阅读通过 `CODE_EXTENSIONS` 筛选文件。典型 Shell 与 PowerShell 扩展名 `.sh`、`.ps1` 尚未纳入允许列表，调查这类变更时要记录覆盖缺口。 [数据源入口](../dhub/sources.py)
+- 当前 Git 搜索和阅读通过 `CODE_EXTENSIONS` 筛选文件。典型 Shell 与 PowerShell 扩展名 `.sh`、`.ps1` 尚未纳入允许列表，调查这类变更时要记录覆盖缺口。 [仓库读取实现](../dhub/repositories.py)
 - 演示的 `fixture-decision` 与 `fixture-channel` 来自合成文件，版本标识为内容哈希，调用关系取自 [codegraph.json](../demo/codegraph.json)。 [仓库接入说明](../README.md#接入项目仓库)
 
 ### 3.1 get_repository_metadata
@@ -297,11 +297,12 @@ Hybrid RAG 是 search_documents 的后端升级，不需要把关键词检索和
 | 组件 | 源码入口 | 定位内容 |
 | --- | --- | --- |
 | Confluence 数据导出 | [confluence.py](../dhub/confluence.py) | `ConfluencePage`、`write_export`、provider 接口 |
-| 单次运行的资料快照 | [sources.py](../dhub/sources.py) | `Sources`、`Knowledge` 文档及章节、`Repository` 与 `CodeGraphAdapter` |
-| Domain 四个工具 | [Domain Investigator](../dhub/agents/domain.py) | 业务工具的白名单与离线调用 |
-| Code 五个工具 | [Code Investigator](../dhub/agents/code.py) | Git / CodeGraph 工具的白名单与离线调用 |
+| 单次运行的资料快照 | [sources.py](../dhub/sources.py) | `Sources` 绑定文档、仓库和 CodeGraph |
+| 文档与章节 | [documents.py](../dhub/documents.py) | `Knowledge` 加载、章节切分、快照标识 |
+| Git 与 CodeGraph 适配 | [repositories.py](../dhub/repositories.py) | `Repository`、`CodeGraphAdapter`、合成调用图 |
+| Domain 四个工具 | [工具定义](../dhub/tools/domain.py) · [Domain Investigator](../dhub/agents/domain.py) | 工具注册、目录、检索、原文读取与离线调用 |
+| Code 五个工具 | [工具定义](../dhub/tools/code.py) · [Code Investigator](../dhub/agents/code.py) | 工具注册、Git、CodeGraph 与离线调用 |
+| 工具注册和模型输入 | [registry.py](../dhub/tools/registry.py) | 从工具函数签名和文档字符串建立 `StructuredTool` |
 | Tool calling、证据、Trace、预算 | [agent_runtime.py](../dhub/agent_runtime.py) | `AgentRuntime.investigate`、`call_tool` |
-
-工具的方法名与第 2、3 节一致。若源码已拆分，可从 `Sources` 的导入跳到 `documents.py`、`repositories.py`、`tools/domain.py`、`tools/code.py`，工具注册与模型 schema 位于 `tools/registry.py`。
 
 当前九个工具均已有本地实现或适配契约；真实 Confluence MCP provider、真实 CodeGraph/MDC adapter、项目仓库配置及真实模型仍需内网联调。V1 Hybrid RAG 未实现。本文不把期望功能误写成已经验证的生产能力。

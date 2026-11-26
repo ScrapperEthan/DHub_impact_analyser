@@ -75,7 +75,7 @@ Domain Agent 可以提供候选函数名或配置键，但不能凭文档声称�
 - 要确认的现有逻辑、调用方、共享依赖、配置和测试；
 - 已知假设、禁止擅自扩展的范围。
 
-该步骤是目标职责。V0 当前通过把 domain_findings 连同 plan 和 requirement 传给 Code Investigator 来近似实现，尚未有独立的 refine_code_task 节点。
+该步骤是目标职责。V0 将 `domain_findings` 连同 `plan` 和 `requirement` 直接传给 Code Investigator，由 Code 组织首轮查询。Main 在双方完成首轮调查后才综合和决定补查。 [首次代码调查和补查对照](agent-spec.md#与-expected-workflow-的差异)
 
 ### Step 4 — Investigate Code（Code）
 

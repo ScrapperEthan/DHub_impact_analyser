@@ -15,7 +15,7 @@ DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更�
 | Document | Scope |
 | --- | --- |
 | [PoC Requirements](poc-requirements.md) | V0 产品需求、Decision Process Baseline、交付范围 |
-| [Agent Spec](agent-spec.md) | V0 Agent 职责、工具及知识准备设计 |
+| [Agent Spec](agent-spec.md) | 当前 V0 流程、与目标的交接差异、Agent 职责及工具 |
 | [API, UI and Trace](api-ui-trace.md) | API、网页、报告与 Trace 契约 |
 | [PoC Acceptance](poc-acceptance.md) | 合成案例、异常场景、真实项目评估 |
 

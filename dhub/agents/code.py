@@ -2,21 +2,12 @@
 
 from ..agent_runtime import AgentRuntime, State, load_system_prompt
 
-CODE_TOOLS = {
-    "get_repository_metadata": "Get actual pinned branch, commit and CodeGraph coverage for a repository.",
-    "search_code": "Find literal terms across configured repositories. A match is a discovery hint.",
-    "read_file": "Read numbered original source lines for a pinned repository. Use its evidence ID.",
-    "codegraph_explore": "Explore static relations for a symbol in an available CodeGraph index.",
-    "codegraph_read_result": "Read the next window of the saved CodeGraph result.",
-}
-
-
 class CodeInvestigator:
     agent_id = "code"
 
     def __init__(self, runtime: AgentRuntime):
         self.runtime = runtime
-        self.tools = runtime.bind_tools(CODE_TOOLS)
+        self.tools = runtime.sources.code.toolset()
 
     def run(self, state: State, parent_span: str, task: dict | None = None) -> dict:
         stage = "代码补查" if task else "调查代码实现"
