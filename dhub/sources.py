@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from .codegraph import BoundCodeGraphAdapter
 from .documents import Knowledge
 from .repositories import DEMO_ROOT, DemoCodeGraph, Repository
 from .repositories import CodeGraphAdapter as CodeGraphAdapter
-from .source_utils import SourceError as SourceError
 from .tools.code import CodeTools
 from .tools.domain import DomainTools
+from .tools.utils.source import SourceError as SourceError
 
 
 class Sources:
@@ -21,7 +22,7 @@ class Sources:
         data_mode: str = "demo",
         manifest_path: str | Path | None = None,
         repositories: list[dict] | None = None,
-        codegraph: CodeGraphAdapter | None = None,
+        codegraph: CodeGraphAdapter | BoundCodeGraphAdapter | None = None,
         deadline: float | None = None,
     ):
         if data_mode not in {"demo", "project"}:
@@ -55,6 +56,7 @@ class Sources:
         self.read_document = self.domain.read_document
         self.get_repository_metadata = self.code.get_repository_metadata
         self.search_code = self.code.search_code
+        self.list_files = self.code.list_files
         self.read_file = self.code.read_file
         self.codegraph_explore = self.code.codegraph_explore
         self.codegraph_read_result = self.code.codegraph_read_result

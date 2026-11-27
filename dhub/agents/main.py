@@ -12,9 +12,13 @@ from ..agent_runtime import (
     load_system_prompt,
 )
 from ..llm import LLMError
-from ..planning import OPEN_TASK_STATUSES, InvestigationPlan, PlanTask, TaskId
+from ..planning import OPEN_TASK_STATUSES
 from ..report import Report, ground_report
-from ..tools.registry import build_toolset, define_tool
+from ..tools.investigate_code import create_investigate_code_tool
+from ..tools.investigate_domain import create_investigate_domain_tool
+from ..tools.registry import build_toolset
+from ..tools.update_plan import create_update_plan_tool
+from ..tools.utils.delegation import run_investigation
 from .code import CodeInvestigator
 from .domain import DomainKnowledgeInvestigator
 
@@ -84,69 +88,23 @@ class MainProcessImpactAnalyser:
         # A model can return unavailable tools without consuming either tool budget.
         remaining_tool_rounds = MAX_DELEGATIONS + MAX_PLAN_UPDATES
 
+        def publish_plan(plan: dict) -> dict:
+            return self._publish_plan(findings, span, plan)
+
         def investigate(
             investigator: DomainKnowledgeInvestigator | CodeInvestigator, question: str, task_id: str | None,
         ) -> dict:
-            question = question.strip()
-            if not question:
-                raise ValueError("Investigation question is empty")
-            plan = findings["plan"]
-            assignment = {"agent": investigator.agent_id, "question": question}
-            if task_id is not None:
-                task = next((task for task in (plan or {}).get("tasks", []) if task["id"] == task_id), None)
-                if task is None:
-                    return {"error": "unknown_task_id", "message": "Use a task ID from the current plan.", "plan": plan}
-                if task["agent"] != investigator.agent_id:
-                    return {"error": "task_agent_mismatch", "message": "Use the investigator assigned to this task.", "plan": plan}
-                assignment["task_id"] = task_id
-            elif plan is not None:
-                return {"error": "task_id_required", "message": "Include the task ID from the current plan.", "plan": plan}
+            return run_investigation(
+                investigator, question, task_id, runtime=self.runtime, findings=findings, span=span,
+                publish_plan=publish_plan,
+            )
 
-            evidence_start = len(self.runtime.evidence)
-            try:
-                finding = investigator.run(findings, span, assignment)
-            finally:
-                if plan is not None:
-                    plan = self._publish_plan(findings, span, plan)
-            findings[investigator.agent_id].append(finding)
-            evidence = list(self.runtime.evidence.values())[evidence_start:]
-            return {
-                "findings": finding,
-                "evidence": [{**entry, "excerpt": entry["excerpt"][:1200]} for entry in evidence],
-                "limitations": self.runtime.limits,
-                **({"task_id": task_id, "plan": plan} if plan is not None else {}),
-            }
-
-        def investigate_domain(question: str, task_id: TaskId | None = None) -> dict:
-            """Check DHub business rules, steps and exceptions. Include task_id when an explicit plan exists."""
-            return investigate(domain, question, task_id)
-
-        def investigate_code(question: str, task_id: TaskId | None = None) -> dict:
-            """Check DHub code, configuration and tests. Include task_id when an explicit plan exists."""
-            return investigate(code, question, task_id)
-
-        def update_plan(
-            goal: str, tasks: list[PlanTask], reason: str,
-            scope: dict[str, str] | None = None, candidate_steps: list[str] | None = None,
-        ) -> dict:
-            """Create or replace the full public investigation plan. Return the current version and tasks."""
-            for task in tasks:
-                if self.runtime.safe_text(task.id, 32) != task.id or task_agents.get(task.id, task.agent) != task.agent:
-                    return {
-                        "error": "invalid_task_id", "plan": findings["plan"],
-                        "message": "Use a public, stable task ID. Use a new ID if the assigned investigator changes.",
-                    }
-            plan = {
-                "goal": goal, "scope": scope or {}, "candidate_steps": candidate_steps or [],
-                "tasks": [task.model_dump(exclude_none=True) for task in tasks], "reason": reason,
-            }
-            snapshot = self._publish_plan(findings, span, plan)
-            task_agents.update({task.id: task.agent for task in tasks})
-            return {"plan": snapshot}
-
-        investigators = build_toolset(define_tool(investigate_domain), define_tool(investigate_code))
+        investigators = build_toolset(
+            create_investigate_domain_tool(lambda question, task_id: investigate(domain, question, task_id)),
+            create_investigate_code_tool(lambda question, task_id: investigate(code, question, task_id)),
+        )
         investigation_schema = [convert_to_openai_tool(definition.tool) for definition in investigators.values()]
-        plan_tool = define_tool(update_plan, args_schema=InvestigationPlan).tool
+        plan_tool = create_update_plan_tool(findings, task_agents, self.runtime.safe_text, publish_plan).tool
         plan_schema = [convert_to_openai_tool(plan_tool)]
 
         def can_delegate() -> bool:

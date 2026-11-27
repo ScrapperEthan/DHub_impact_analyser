@@ -3,12 +3,16 @@
 import hashlib
 import json
 import re
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
+from itertools import accumulate
 from pathlib import Path
 
-from .source_utils import SourceError, path_in_source, read_source_text
+from .tools.utils.search import query_tokens
+from .tools.utils.source import SourceError, path_in_source, read_source_text
 
-HEADING = re.compile(r"^(#{1,6})[ \t]+(.+?)[ \t]*#*[ \t]*$")
+HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(\S.*)$")
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 MAX_MARKDOWN_BYTES = 8_000_000
 
 
@@ -16,41 +20,105 @@ def _page_key(page_id: str, version: str | int) -> tuple[str, str]:
     return str(page_id).strip(), str(version).strip()
 
 
-def _sections(content: str) -> list[tuple[str, int, int]]:
-    headings: list[tuple[str, int, int]] = []
-    stack: list[tuple[int, str]] = []
+@dataclass
+class Section:
+    section_id: str
+    path: str
+    parent_id: str | None
+    start: int
+    search_end: int
+    read_end: int
+    folded_heading: str = ""
+    folded_text: str = field(init=False)
+    terms: set[str] = field(init=False)
+    heading_terms: set[str] = field(init=False)
+
+
+def _sections(lines: list[str]) -> list[Section]:
+    sections: list[Section] = []
+    stack: list[tuple[int, str, Section]] = []
     fence = ""
-    for index, line in enumerate(content.splitlines()):
-        left = line.lstrip()
-        if left.startswith(("~~~", "```")):
-            marker = left[:3]
+    for index, raw_line in enumerate(lines):
+        line = raw_line.rstrip("\r\n")
+        fence_match = FENCE.match(line)
+        if fence_match:
+            marker, trailing = fence_match.groups()
             if not fence:
                 fence = marker
-            elif marker == fence:
+            elif marker.startswith(fence) and not trailing.strip():
                 fence = ""
             continue
-        match = HEADING.match(line)
-        if not match or fence:
+        heading = HEADING.match(line) if not fence else None
+        if not heading:
             continue
-        depth = len(match[1])
+        depth = len(heading[1])
+        name = re.sub(r"[ \t]+#+[ \t]*$", "", heading[2]).rstrip()
         while stack and stack[-1][0] >= depth:
-            stack.pop()
-        # The first H1 is typically the document title rather than a section label.
-        stack.append((depth, match[2]))
-        path = " / ".join(name for level, name in stack if level > 1) or match[2]
-        headings.append((path, index, depth))
-    return headings
+            stack.pop()[2].read_end = index
+        if not sections and index:
+            sections.append(Section("sec-1", "Preamble", None, 0, index, index))
+        if sections:
+            sections[-1].search_end = index
+        # Keep the existing display path without the H1 page title.
+        parents = [label for level, label, _ in stack if level > 1]
+        path = " / ".join([*parents, name])
+        section = Section(
+            f"sec-{index + 1}", path, stack[-1][2].section_id if stack else None,
+            index, len(lines), len(lines), path.casefold(),
+        )
+        sections.append(section)
+        stack.append((depth, name, section))
+    return sections or [Section("sec-1", "Document", None, 0, len(lines), len(lines))]
 
 
 @dataclass
 class Document:
     metadata: dict
     content: str
-    sections: list[tuple[str, int, int]] = field(init=False)
+    lines: list[str] = field(init=False)
+    line_offsets: list[int] = field(init=False)
+    sections: dict[str, Section] = field(init=False)
+    primary_section: str = field(init=False)
+    folded_title: str = field(init=False)
+    title_terms: set[str] = field(init=False)
+    keyword_terms: set[str] = field(init=False)
 
     def __post_init__(self) -> None:
-        self.sections = _sections(self.content)
-        self.metadata["headings"] = [name for name, _, _ in self.sections]
+        self.lines = self.content.splitlines(keepends=True)
+        self.line_offsets = list(accumulate(map(len, self.lines), initial=0))
+        sections = _sections(self.lines)
+        headings = [section for section in sections if section.folded_heading]
+        self.metadata["headings"] = [section.path for section in headings]
+        self.primary_section = (headings or sections)[0].section_id
+        self.folded_title = self.metadata["title"].casefold()
+        self.title_terms = query_tokens(self.folded_title)
+        self.keyword_terms = query_tokens(str(self.metadata.get("keywords") or ""))
+        for section in sections:
+            start, end = self.line_offsets[section.start], self.line_offsets[section.search_end]
+            section.folded_text = self.content[start:end].casefold()
+            section.terms = query_tokens(section.folded_text)
+            section.heading_terms = query_tokens(section.folded_heading)
+        self.sections = {section.section_id: section for section in sections}
+
+    def section(self, name: str | None, section_id: str | None) -> Section | None:
+        if section_id is not None:
+            section = self.sections.get(section_id)
+            if section is None:
+                raise SourceError("section_not_found", "Use a section_id from search_documents for this page and version.")
+            return section
+        if not name or name.strip().casefold() == "document":
+            return None
+        matches = [section for section in self.sections.values() if section.path.casefold() == name.strip().casefold()]
+        if len(matches) > 1:
+            raise SourceError("ambiguous_section", "Multiple sections share that name. Search this page and use section_id.")
+        if not matches:
+            raise SourceError("section_not_found", "Section was not found. Search this page or read the full page.")
+        return matches[0]
+
+    def lines_for_window(self, start: int, end: int) -> tuple[int | None, int | None]:
+        if start >= end:
+            return None, None
+        return bisect_right(self.line_offsets, start), bisect_left(self.line_offsets, end)
 
 
 class Knowledge:

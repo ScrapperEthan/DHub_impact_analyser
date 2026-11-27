@@ -69,7 +69,8 @@ class ChatGateway(HTTPServer):
             else:
                 self.assert_system_prompt(messages, "code.md")
                 assert set(tools) == {
-                    "get_repository_metadata", "search_code", "read_file", "codegraph_explore", "codegraph_read_result",
+                    "get_repository_metadata", "search_code", "list_files", "read_file",
+                    "codegraph_explore", "codegraph_read_result",
                 }
                 name = "read_file"
                 file_path = "decision/inbound.py" if user_data["code_findings"] else "decision/frequency.py"
@@ -343,6 +344,8 @@ class AdaptivePlanningTest(unittest.TestCase):
                 return ChatResult(ChatGateway._json_message({"evidence_ids": results[-1]["evidence_ids"]}), {})
 
             self.assertEqual({tool["function"]["name"] for tool in tools}, MAIN_TOOLS)
+            self.assertIn("Documents can be outdated", prompt)
+            self.assertIn("at the pinned Git commit", prompt)
             index = len(results)
             if index == 0:
                 message = request_tool("investigate_domain", {"question": "确认频控业务规则"}, index)
@@ -717,8 +720,8 @@ class PoCTest(unittest.TestCase):
                     self.assertEqual(trace[span]["input_summary"]["task_id"], task["id"])
             self.assertNotRegex(json.dumps([report, events], ensure_ascii=False), r"[\u3400-\u9fff]")
             tools = {event["tool_name"]: event for event in events if event["type"] == "tool.finished"}
-            self.assertEqual(tools["codegraph_explore"]["output_summary"]["result_id"],
-                             tools["codegraph_read_result"]["input_summary"]["result_id"])
+            self.assertEqual(tools["codegraph_explore"]["output_summary"]["result_ref"],
+                             tools["codegraph_read_result"]["output_summary"]["result_ref"])
 
             with TestClient(create_app(settings)) as client:
                 base_url = f"/api/runs/{snapshot['run_id']}"

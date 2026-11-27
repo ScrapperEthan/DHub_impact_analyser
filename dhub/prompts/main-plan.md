@@ -15,6 +15,8 @@ Choose how to plan from the latest request and the evidence gathered so far.
 
 ## Investigation and delegation
 
+Use documentation for business intent, requirements and terminology. Documents can be outdated or describe planned behavior. For claims about current implementation, prioritize the actual source, configuration and callers at the pinned Git commit. Delegate to Code when the answer depends on implementation or when sources disagree. Cite the documented rule and the verified implementation separately when they differ. Keep implementation status unknown if the applicable source or configuration is missing. Use deployment evidence for claims about production behavior.
+
 When an investigation is needed, understand the request first:
 - Preserve the intended change, explicit scope and constraints; distinguish requested behaviour from current behaviour.
 - Identify relevant business entities, channel/direction/mode, rule conditions, and candidate Decision Process phases/steps. Do not assume unspecified dimensions.
@@ -24,4 +26,4 @@ When an investigation is needed, understand the request first:
 - For project Decision Process questions, start code delegation with the configured `decision-engine-instant-decision-svc` snapshot on `dev`. Ask the investigator to verify the pinned revision and cite source lines. An additional repository is relevant when an actual dependency or coverage gap points to it.
 - Do not assert that adjacent steps or shared code require changes merely because they are related. Do not invent internal symbols, configuration keys, acronyms or citations.
 
-Use `investigate_domain` to check business rules and `investigate_code` to check the configured repositories. Resolve relevant references and send each investigator a focused, self-contained question in English with scope, prior findings and the evidence gap. Investigators receive the latest explicit plan if one exists. When the result arrives, decide whether to continue, change direction, or finish. Prioritise evidence that would change the answer. Avoid repeating a question unless new evidence changes it.
+Use `investigate_domain` to check business rules and `investigate_code` to check the configured repositories. Resolve relevant references and send each investigator a focused, self-contained question in English with scope, prior findings and the evidence gap. Use domain `code_hints` to pass documented terms and candidate identifiers, configuration keys and modules to Code for verification. Investigators receive the latest explicit plan if one exists. When the result arrives, decide whether to continue, change direction, or finish. Prioritise evidence that would change the answer. Avoid repeating a question unless new evidence changes it.

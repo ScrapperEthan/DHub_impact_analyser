@@ -32,6 +32,12 @@ class DomainKnowledgeInvestigator:
             return {"coverage": "Searched the demo documents. A model gateway is required to analyze other requests."}
         tool("list_documents", limit=8)
         tool("search_documents", query="mandatory campaign frequency cap")
-        tool("read_document", page_id="DEMO-FD2", version="1", section="Phase 5 / Step 18")
-        tool("read_document", page_id="DEMO-SETTINGS", version="1", section="Frequency Cap")
-        return {"code_hints": ["should_allow_campaign", "allow_mandate_campaign_override"]}
+        rule = tool("read_document", page_id="DEMO-FD2", version="1", section="Phase 5 / Step 18")
+        settings = tool("read_document", page_id="DEMO-SETTINGS", version="1", section="Frequency Cap")
+        return {"code_hints": {
+            "business_terms": ["Frequency Cap", "Mandatory Campaign"],
+            "possible_identifiers": ["should_allow_campaign"],
+            "config_keys": ["allow_mandate_campaign_override"],
+            "suspected_modules": [],
+            "evidence_ids": rule.get("evidence_ids", []) + settings.get("evidence_ids", []),
+        }}

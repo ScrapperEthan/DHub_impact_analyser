@@ -3,10 +3,12 @@
 import json
 import logging
 import re
+from collections import defaultdict, deque
 from collections.abc import Callable
 from concurrent.futures import Future
 from contextlib import contextmanager
 from contextvars import copy_context
+from hashlib import sha256
 from pathlib import Path
 from threading import Thread
 from time import monotonic
@@ -18,15 +20,18 @@ from pydantic import ValidationError
 
 from .config import MAX_RUN_TIMEOUT, Settings
 from .llm import LLMError, create_client
-from .source_utils import SourceError
 from .sources import Sources
 from .tools.registry import ToolDefinition
+from .tools.utils.source import SourceError
 
 log = logging.getLogger(__name__)
 PROMPT_DIR = Path(__file__).with_name("prompts")
 MAX_RUN_TOOLS = 50
 MAX_INVESTIGATOR_TOOLS = 8
 MAX_DELEGATIONS = 50
+SEARCH_TOOLS = {"search_code", "search_documents"}
+GRAPH_TOOLS = {"codegraph_explore", "codegraph_read_result"}
+MAX_SEARCH_HISTORY = 8
 TIME_LIMIT = "The run reached its time limit."
 TOOL_LIMIT = f"The run reached the limit of {MAX_RUN_TOOLS} source tool calls."
 T = TypeVar("T")
@@ -111,6 +116,9 @@ class AgentRuntime:
         self.deadline = deadline
         self.evidence: dict[str, dict] = {}
         self.limits: list[str] = []
+        self._limitation_count = 0
+        self._search_history: dict[str, deque[dict]] = defaultdict(lambda: deque(maxlen=MAX_SEARCH_HISTORY))
+        self._retrieval_coverage: dict[str, list[dict]] = defaultdict(list)
         self.tool_count = 0
         self.span_count = 0
         self._span_tasks: dict[str, str] = {}
@@ -119,6 +127,7 @@ class AgentRuntime:
         return self.tool_count < MAX_RUN_TOOLS and self.remaining() > 0
 
     def note(self, text: str):
+        self._limitation_count += 1
         if text not in self.limits:
             self.limits.append(text)
 
@@ -129,15 +138,38 @@ class AgentRuntime:
         self.span_count += 1
         return f"{prefix}-{self.span_count}-{uuid4().hex[:6]}"
 
-    def safe_text(self, value: str, limit: int) -> str:
+    def redact_text(self, value: str, *, preserve_length: bool = False) -> str:
+        def mask(secret: str) -> str:
+            return "*" * len(secret) if preserve_length else "[redacted]"
+
         key = self.settings.llm.api_key
         if key:
-            value = value.replace(key, "[redacted]")
-        value = re.sub(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1[redacted]", value)
-        value = re.sub(r"(?i)\b((?:api[_-]?key|access[_-]?token|password|secret)\s*[=:]\s*)[^\s,;]+", r"\1[redacted]", value)
-        return value[:limit]
+            value = value.replace(key, mask(key))
+        value = re.sub(
+            r"(?i)\b(bearer\s+)([A-Za-z0-9._~+/=-]+)", lambda match: match[1] + mask(match[2]), value,
+        )
+        value = re.sub(
+            r"(?i)\b((?:api[_-]?key|access[_-]?token|password|secret)\s*[=:]\s*)([^\s,;]+)",
+            lambda match: match[1] + mask(match[2]), value,
+        )
+        return value
 
-    def trace_input(self, arguments: dict, fields: tuple[str, ...]) -> dict:
+    def safe_text(self, value: str, limit: int) -> str:
+        return self.redact_text(value)[:limit]
+
+    def source_window_for_model(self, result: dict) -> dict:
+        # Apply the same redactions to the returned and recorded source window.
+        if "content" in result:
+            original = result["content"]
+            visible = self.redact_text(original, preserve_length=True)
+            return {**result, "content": visible, "redacted": True} if visible != original else result
+        if "lines" in result:
+            original = result["lines"]
+            visible = [{**line, "text": self.redact_text(line["text"], preserve_length=True)} for line in original]
+            return {**result, "lines": visible, "redacted": True} if visible != original else result
+        return result
+
+    def trace_input(self, arguments: dict, fields: tuple[str, ...], *, list_limit: int = 8) -> dict:
         summary = {}
         for key in fields:
             value = arguments.get(key)
@@ -146,7 +178,7 @@ class AgentRuntime:
             elif isinstance(value, int):
                 summary[key] = value
             elif isinstance(value, list):
-                summary[key] = [self.safe_text(item, 80) for item in value[:8] if isinstance(item, str)]
+                summary[key] = [self.safe_text(item, 80) for item in value[:list_limit] if isinstance(item, str)]
         return summary
 
     @contextmanager
@@ -156,7 +188,7 @@ class AgentRuntime:
         meta = {"agent_id": agent, "stage": stage, "span_id": span, "parent_span_id": parent}
         if task:
             meta["input_summary"] = self.trace_input(task, ("question", "task_id"))
-        previous_limits = len(self.limits)
+        previous_limits = self._limitation_count
         self.emit({**meta, "type": "agent.started", "status": "running"})
         if task and task.get("task_id"):
             self._span_tasks[span] = task["task_id"]
@@ -168,7 +200,8 @@ class AgentRuntime:
             raise
         finally:
             self._span_tasks.pop(span, None)
-            if status == "succeeded" and len(self.limits) > previous_limits:
+            self._retrieval_coverage.pop(span, None)
+            if status == "succeeded" and self._limitation_count > previous_limits:
                 status = "partial"
             self.emit({**meta, "type": "agent.finished", "status": status, "elapsed_ms": int((monotonic() - start) * 1000)})
 
@@ -179,7 +212,6 @@ class AgentRuntime:
             **evidence,
             "evidence_id": evidence_id,
             "tool_span_id": span,
-            "excerpt": self.safe_text(evidence["excerpt"], 12000),
             **({"task_id": task_id} if task_id is not None else {}),
         }
         return evidence_id
@@ -214,23 +246,52 @@ class AgentRuntime:
         error_code = None
         error_summary = None
         status = "succeeded"
+        graph_call = name in GRAPH_TOOLS
         try:
             result = run_before_deadline(self.deadline, definition.tool.invoke, arguments)
-            evidence = definition.evidence_factory(result) if definition.evidence_factory else None
-            if evidence:
-                evidence_id = self.record_evidence(evidence, span, parent)
-                result = {**result, "evidence_ids": [evidence_id]}
-                output["evidence_ids"] = [evidence_id]
+            if definition.evidence_factory:
+                result = self.source_window_for_model(result)
+                if evidence := definition.evidence_factory(result):
+                    if result.get("redacted"):
+                        evidence["redacted"] = True
+                    evidence_id = self.record_evidence(evidence, span, parent)
+                    result = {**result, "evidence_ids": [evidence_id]}
+                    output["evidence_ids"] = [evidence_id]
             for key in ("results", "lines"):
                 if isinstance(result.get(key), list):
                     output["count"] = len(result[key])
-            for key in ("result_id", "next_offset", "next_start_line", "status"):
-                if result.get(key) is not None:
+            for key in (
+                "section_id", "status", "total", "returned", "has_more", "truncated", "line_truncated",
+                "start_line", "end_line", "next_offset", "next_start_line", "next_column_offset", "redacted",
+            ):
+                if key in result:
                     value = result[key]
                     output[key] = self.safe_text(value, 180) if isinstance(value, str) else value
+            if graph_call:
+                for key in ("captured_count", "result_format", "repo_id", "provider"):
+                    if key in result:
+                        value = result[key]
+                        output[key] = self.safe_text(value, 180) if isinstance(value, str) else value
+                if result_id := result.get("result_id"):
+                    output["result_ref"] = sha256(result_id.encode("ascii")).hexdigest()[:16]
+            if "effective_scope" in result:
+                output["effective_scope"] = self.trace_input(
+                    result["effective_scope"], definition.trace_fields, list_limit=16,
+                )
             if result.get("unavailable"):
                 output["unavailable_count"] = len(result["unavailable"])
-                self.note("Some repositories could not be searched.")
+            if warnings := result.get("warnings"):
+                if graph_call:
+                    output["warning_count"] = len(warnings)
+                else:
+                    output["warnings"] = [self.safe_text(warning, 240) for warning in warnings[:3]]
+            if result.get("status") in {"partial", "unavailable"}:
+                status = "partial" if result["status"] == "partial" else "failed"
+                detail = (
+                    f"CodeGraph coverage is {result['status']}."
+                    if graph_call else " ".join(output.get("warnings", [])) or "Some requested sources are unavailable."
+                )
+                self.note(f"{name} · {detail}")
             return result
         except SourceError as exc:
             error_code = self.safe_text(str(exc.code), 80)
@@ -240,12 +301,39 @@ class AgentRuntime:
             if isinstance(exc, RunDeadlineExceeded):
                 self.note(TIME_LIMIT)
             error_code, error_summary, status = "timeout", "The tool call timed out.", "timeout"
-        except (TypeError, ValueError, ValidationError):
+        except ValidationError as exc:
+            details = ". ".join(
+                f"{'.'.join(map(str, problem['loc']))}: {problem['msg']}"
+                for problem in exc.errors(include_input=False, include_context=False, include_url=False)[:3]
+            )
+            error_code, error_summary, status = "invalid_arguments", self.safe_text(details, 240), "failed"
+        except (TypeError, ValueError):
             error_code, error_summary, status = "invalid_arguments", "The tool received invalid arguments.", "failed"
         except Exception as exc:
             log.warning("Tool %s failed (%s)", name, type(exc).__name__)
             error_code, error_summary, status = "tool_failed", "The tool call failed.", "failed"
         finally:
+            if name in SEARCH_TOOLS:
+                scope = output.get("effective_scope", meta["input_summary"])
+                self._search_history[agent].append({
+                    "tool": name, "query": meta["input_summary"].get("query"),
+                    "scope": {key: value for key, value in scope.items() if key != "query"},
+                    "returned": output.get("returned", 0), "status": output.get("status", status),
+                    "has_more": output.get("has_more"),
+                })
+            if graph_call or name in SEARCH_TOOLS:
+                coverage = {
+                    key: output[key] for key in (
+                        "repo_id", "effective_scope", "returned", "captured_count", "has_more",
+                        "truncated", "result_format", "provider", "warning_count", "unavailable_count",
+                    ) if key in output
+                }
+                if graph_call and "repo_id" in meta["input_summary"]:
+                    coverage["repo_id"] = meta["input_summary"]["repo_id"]
+                self._retrieval_coverage[parent].append({
+                    **coverage, "tool": name, "status": output.get("status", status),
+                    **({"error": error_code} if error_code else {}),
+                })
             self.emit({
                 **meta, "type": "tool.finished", "status": status,
                 "elapsed_ms": int((monotonic() - start) * 1000), "output_summary": output,
@@ -316,12 +404,18 @@ class AgentRuntime:
         tools: dict[str, ToolDefinition],
         data: dict,
     ) -> dict:
+        if history := self._search_history.get(agent):
+            data = {**data, "search_history": list(history)}
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": as_json(data)},
         ]
         try:
-            return json_object(self.chat_with_tools(agent, span, messages, tools))
+            findings = json_object(self.chat_with_tools(agent, span, messages, tools))
         except LLMError as exc:
             self.note(f"{stage} · {exc}")
-        return {"open_questions": [f"Investigation incomplete. See the trace for {stage.lower()}."]}
+            findings = {"open_questions": [f"Investigation incomplete. See the trace for {stage.lower()}."]}
+        findings.pop("retrieval_coverage", None)
+        if coverage := self._retrieval_coverage.pop(span, []):
+            findings["retrieval_coverage"] = coverage
+        return findings

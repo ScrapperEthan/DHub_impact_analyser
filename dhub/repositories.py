@@ -3,13 +3,19 @@
 import hashlib
 import json
 import os
+import re
 import subprocess
+from concurrent.futures import Future
 from dataclasses import dataclass, field
+from fnmatch import fnmatchcase
 from pathlib import Path, PurePosixPath
+from threading import Thread
 from time import monotonic
-from typing import Protocol
 
-from .source_utils import SourceError, path_in_source, query_tokens, read_source_text, relative_path
+from .codegraph import CodeGraphAdapter as CodeGraphAdapter
+from .codegraph import CodeGraphIndex, CodeGraphResult
+from .tools.utils.search import match_excerpt, query_tokens
+from .tools.utils.source import SourceError, path_in_source, read_source_text, relative_path
 
 DEMO_ROOT = Path(__file__).resolve().parent.parent / "demo"
 CODE_EXTENSIONS = frozenset({
@@ -17,17 +23,11 @@ CODE_EXTENSIONS = frozenset({
 })
 MAX_CODE_BYTES = 512_000
 MAX_DEMO_GRAPH_BYTES = 8_000_000
+MAX_GREP_BYTES = 2_000_000
+GREP_PATH_ARGUMENT_BUDGET = 12_000
 
 
-class CodeGraphAdapter(Protocol):
-    """Bind graph evidence to the Git commit the index represents."""
-
-    def indexed_commit(self, repo_id: str) -> str | None: ...
-
-    def explore(self, *, repo_id: str, commit_sha: str, query: str) -> list[dict]: ...
-
-
-def _git(root: Path, *args: str, allow_no_matches: bool = False, timeout: float = 20) -> bytes:
+def _git_invocation(root: Path, args: tuple[str, ...]) -> tuple[list[str], dict[str, str]]:
     env = {
         **os.environ,
         "GIT_TERMINAL_PROMPT": "0",
@@ -37,18 +37,100 @@ def _git(root: Path, *args: str, allow_no_matches: bool = False, timeout: float 
     }
     for key in ("GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_INDEX_FILE"):
         env.pop(key, None)
+    return ["git", "--no-pager", "-c", "core.fsmonitor=false", "-C", str(root), *args], env
+
+
+def _git(root: Path, *args: str, timeout: float = 20) -> bytes:
+    command, env = _git_invocation(root, args)
     try:
-        result = subprocess.run(
-            ["git", "--no-pager", "-c", "core.fsmonitor=false", "-C", str(root), *args],
-            capture_output=True, timeout=timeout, env=env, check=False,
-        )
+        result = subprocess.run(command, capture_output=True, timeout=timeout, env=env, check=False)
     except subprocess.TimeoutExpired:
         raise SourceError("source_timeout", "The read-only Git operation timed out.") from None
     except OSError:
         raise SourceError("repository_unavailable", "Git is not available for the repository.") from None
-    if result.returncode == 0 or (allow_no_matches and result.returncode == 1):
+    if result.returncode == 0:
         return result.stdout
     raise SourceError("git_read_failed", "The requested Git object or configured revision is unavailable.")
+
+
+def _bounded_grep(root: Path, args: tuple[str, ...], limit: int, deadline: float) -> tuple[bytes, bool]:
+    if deadline <= monotonic():
+        raise SourceError("source_timeout", "Git search reached its time limit.")
+    command, env = _git_invocation(root, args)
+    try:
+        with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=env) as process:
+            collected: Future[bytes] = Future()
+
+            def read_output() -> None:
+                try:
+                    collected.set_result(process.stdout.read(limit + 1))
+                except OSError as error:
+                    collected.set_exception(error)
+
+            reader = Thread(target=read_output, daemon=True)
+            reader.start()
+            try:
+                output = collected.result(timeout=max(0, deadline - monotonic()))
+                if len(output) > limit:
+                    return output[:limit], True
+                if process.wait(timeout=max(0, deadline - monotonic())) not in (0, 1):
+                    raise SourceError("git_read_failed", "Git could not search the pinned commit.")
+                return output, False
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                reader.join()
+    except (TimeoutError, subprocess.TimeoutExpired):
+        raise SourceError("source_timeout", "Git search reached its time limit.") from None
+    except OSError:
+        raise SourceError("repository_unavailable", "Git could not run the repository search.") from None
+
+
+def _path_batches(paths: list[str]):
+    # Leave room below the Windows command-line limit for the root, patterns and quoting.
+    batch = []
+    size = 0
+    for path in paths:
+        argument_size = 2 * len(path) + 3
+        if batch and size + argument_size > GREP_PATH_ARGUMENT_BUDGET:
+            yield batch
+            batch, size = [], 0
+        batch.append(path)
+        size += argument_size
+    if batch:
+        yield batch
+
+
+def parse_glob(glob: str | None) -> tuple[str, ...]:
+    if glob is None:
+        return ()
+    if len(glob) > 240:
+        raise SourceError("invalid_glob", "Use a repository-relative glob up to 240 characters.")
+    parts = PurePosixPath(relative_path(glob)).parts
+    if parts.count("**") > 1 or any("**" in part and part != "**" for part in parts):
+        raise SourceError("invalid_glob", "Use at most one standalone ** path component.")
+    return parts
+
+
+def _matches_glob(path: str, pattern: tuple[str, ...]) -> bool:
+    if not pattern:
+        return True
+    parts = path.split("/")
+    if "**" not in pattern:
+        return len(parts) == len(pattern) and all(fnmatchcase(part, glob) for part, glob in zip(parts, pattern))
+    pivot = pattern.index("**")
+    before, after = pattern[:pivot], pattern[pivot + 1:]
+    return (
+        len(parts) >= len(pattern) - 1
+        and all(fnmatchcase(part, glob) for part, glob in zip(parts, before))
+        and all(fnmatchcase(part, glob) for part, glob in zip(reversed(parts), reversed(after)))
+    )
+
+
+def code_lines(content: str) -> list[str]:
+    # Git grep numbers LF-delimited lines. Preserve other characters inside the original line.
+    lines = content.split("\n")
+    return [line.removesuffix("\r") for line in lines[:-1]] + ([lines[-1]] if lines[-1] else [])
 
 
 @dataclass
@@ -63,11 +145,14 @@ class Repository:
     error: str | None = None
     deadline: float | None = None
 
-    def _git(self, *args: str, allow_no_matches: bool = False) -> bytes:
+    def _timeout(self) -> float:
         timeout = 20 if self.deadline is None else min(20, self.deadline - monotonic())
         if timeout <= 0:
             raise SourceError("source_timeout", "The run deadline has been reached.")
-        return _git(self.root, *args, allow_no_matches=allow_no_matches, timeout=timeout)
+        return timeout
+
+    def _git(self, *args: str) -> bytes:
+        return _git(self.root, *args, timeout=self._timeout())
 
     def pin(self) -> None:
         try:
@@ -111,7 +196,10 @@ class Repository:
                     continue
                 attrs, raw_path = entry.split(b"\t", 1)
                 mode, kind, oid, length = attrs.decode("ascii").split()
-                path = raw_path.decode("utf-8", errors="replace")
+                try:
+                    path = raw_path.decode("utf-8")
+                except UnicodeError:
+                    continue
                 if mode in {"100644", "100755"} and kind == "blob" and _code_path(path):
                     self.files[path] = (oid, int(length))
         except (OSError, ValueError, SourceError) as error:
@@ -147,46 +235,86 @@ class Repository:
             raise SourceError("unsupported_encoding", "This source is not UTF-8 text.")
         return content
 
-    def search(self, queries: list[str], prefix: str, extensions: set[str], limit: int) -> list[dict]:
+    def matching_paths(self, prefix: str, pattern: tuple[str, ...], extensions: set[str] | frozenset[str]) -> list[str]:
+        return [
+            path for path in sorted(self.files)
+            if (not prefix or path == prefix or path.startswith(prefix + "/"))
+            and PurePosixPath(path).suffix.lower() in extensions
+            and _matches_glob(path, pattern)
+        ]
+
+    def search(self, queries: list[str], paths: list[str], limit: int) -> tuple[list[dict], str | None]:
+        if not paths:
+            return [], None
+        pattern = re.compile("|".join(re.escape(term) for term in sorted(queries, key=len, reverse=True)), re.IGNORECASE)
         matches = []
         if self.synthetic:
             rows = (
                 (path, line, text)
-                for path, content in self.files.items()
-                if _search_path(path, prefix, extensions)
-                for line, text in enumerate(str(content).splitlines(), 1)
-                if any(query.casefold() in text.casefold() for query in queries)
+                for path in paths
+                for line, text in enumerate(code_lines(self.files[path]), 1)
             )
-        else:
-            args = [part for query in queries for part in ("-e", query)]
-            output = self._git(
-                "grep", "--no-textconv", "-I", "-i", "-F", "-n", "-z", "--full-name",
-                f"--max-count={limit}", *args, self.commit_sha, "--",
-                *(f":(glob,icase)**/*{extension}" for extension in sorted(extensions)),
-                allow_no_matches=True,
-            )
-            rows = self._grep_rows(output, prefix, extensions)
+            self._collect_matches(rows, pattern, matches, limit)
+            return matches, None
+
+        args = tuple(part for query in queries for part in ("-e", query))
+        # The pinned tree gives the intersection of prefix, glob and extension filters up front.
+        command = (
+            "--literal-pathspecs", "grep", "--no-textconv", "--no-recurse-submodules",
+            "-I", "-i", "-F", "-H", "-n", "-z", "--full-name", "--no-column", "--no-heading",
+            "--no-break", "--color=never", f"--max-count={limit}", *args, self.commit_sha, "--",
+        )
+        deadline = monotonic() + self._timeout()
+        budget = MAX_GREP_BYTES
+        completed_batch = False
+        for batch in _path_batches(paths):
+            try:
+                output, capped = _bounded_grep(self.root, (*command, *batch), budget, deadline)
+            except SourceError as error:
+                if not completed_batch:
+                    raise
+                return matches, str(error)
+            self._collect_matches(self._grep_rows(output), pattern, matches, limit)
+            if capped:
+                return matches, "Git search reached its output byte limit. Narrow the path or query."
+            if len(matches) == limit:
+                return matches, None
+            budget -= len(output)
+            completed_batch = True
+        return matches, None
+
+    def _collect_matches(self, rows, pattern: re.Pattern, matches: list[dict], limit: int) -> None:
         for path, line, text in rows:
+            match = pattern.search(text)
+            if not match:
+                continue
             matches.append({
                 "repo_id": self.repo_id, "branch": self.branch, "commit_sha": self.commit_sha,
-                "path": path, "line": line, "text": text[:400],
+                "path": path, "line": line, "column": match.start() + 1, "matched_term": match[0],
+                "text": match_excerpt(text, match.start(), match.end(), 400),
             })
             if len(matches) == limit:
-                break
-        return matches
+                return
 
-    def _grep_rows(self, output: bytes, prefix: str, extensions: set[str]):
-        tree_prefix = f"{self.commit_sha}:"
-        for row in output.split(b"\n"):
+    def _grep_rows(self, output: bytes):
+        tree_prefix = f"{self.commit_sha}:".encode("ascii")
+        # Ignore the unfinished last row when the byte budget cuts through one.
+        for row in output.split(b"\n")[:-1]:
             parts = row.split(b"\0", 2)
             if len(parts) != 3:
                 continue
-            name, line, text = (part.decode("utf-8", errors="replace") for part in parts)
+            name, line, text = parts
             if not name.startswith(tree_prefix) or not line.isdigit():
                 continue
-            path = name.removeprefix(tree_prefix)
-            if path in self.files and _search_path(path, prefix, extensions):
-                yield path, int(line), text
+            path = name[len(tree_prefix):].decode("utf-8")
+            if path not in self.files:
+                continue
+            try:
+                line_number = int(line)
+                source = text.decode("utf-8-sig" if line_number == 1 else "utf-8").removesuffix("\r")
+            except UnicodeError:
+                continue
+            yield path, line_number, source
 
 
 def _code_path(path: str) -> bool:
@@ -194,32 +322,29 @@ def _code_path(path: str) -> bool:
         parts = PurePosixPath(relative_path(path)).parts
     except SourceError:
         return False
-    return all(part != ".git" for part in parts) and PurePosixPath(path).suffix.lower() in CODE_EXTENSIONS
-
-
-def _search_path(path: str, prefix: str, extensions: set[str]) -> bool:
-    return (
-        (not prefix or path == prefix or path.startswith(prefix + "/"))
-        and PurePosixPath(path).suffix.lower() in extensions
-    )
+    return all(part.casefold() != ".git" for part in parts) and PurePosixPath(path).suffix.lower() in CODE_EXTENSIONS
 
 
 class DemoCodeGraph:
     def __init__(self, repositories: dict[str, Repository]):
         self.repositories = repositories
         try:
-            self.edges = json.loads(read_source_text(DEMO_ROOT / "codegraph.json", MAX_DEMO_GRAPH_BYTES))
+            raw = read_source_text(DEMO_ROOT / "codegraph.json", MAX_DEMO_GRAPH_BYTES)
+            self.edges = json.loads(raw)
+            self.index_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()
         except (ValueError, OSError, SourceError):
             self.edges = {}
 
-    def indexed_commit(self, repo_id: str) -> str | None:
-        return self.repositories[repo_id].commit_sha if repo_id in self.edges else None
+    def index_info(self, repo_id: str, *, deadline: float) -> CodeGraphIndex | None:
+        if repo_id not in self.edges:
+            return None
+        return CodeGraphIndex("demo", self.repositories[repo_id].commit_sha, self.index_id, ("python",))
 
-    def explore(self, *, repo_id: str, commit_sha: str, query: str) -> list[dict]:
+    def explore(self, *, repo_id: str, index: CodeGraphIndex, query: str, deadline: float) -> CodeGraphResult:
         terms = query_tokens(query)
         matches = []
         for edge in self.edges.get(repo_id, []):
             label = " ".join(str(edge.get(key, "")) for key in ("caller", "callee", "path")).casefold()
             if any(term in label for term in terms):
                 matches.append(edge)
-        return matches
+        return CodeGraphResult(index, results=matches)
