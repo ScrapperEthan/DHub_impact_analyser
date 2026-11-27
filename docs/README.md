@@ -1,11 +1,12 @@
 # DHub Process Impact Analyser — Documentation
 
-DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更，定位相关流程步骤、规则、源码、配置和测试，并给出有来源的影响判断与回归场景。目标资料来自 Confluence FD1–FD5、Core Component Documentation 和一个 Git 仓库，仓库语言构成为 94% Python、4% Shell、2% PowerShell。代码调查可复用 MDC Assistant 的四个工具。内置演示使用合成资料。
+DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更，定位相关流程步骤、规则、源码、配置和测试，并给出有来源的影响判断与回归场景。目标资料来自 Confluence FD1–FD5、Core Component Documentation 和一个 Git 仓库，仓库语言构成为 94% Python、4% Shell、2% PowerShell。代码调查使用 DHub 自身的 Git 工具；V0 内网联调目标是复用 MDC Assistant 的 CodeGraph 相关 Tools 及底层实现，不依赖 MDC Assistant 应用本身。内置演示使用合成资料。
 
 ## 从这里开始
 
 | Document | Scope |
 | --- | --- |
+| [Current Status](current-status.md) | 本地实现、测试、内网联调进度与下一步；动态状态的统一入口 |
 | [Expected Workflow](expected-workflow.md) | 三个 Agent 的目标流程、Decision Process Baseline、Frequency Cap 示例、当前 LangGraph 与目标的差距 |
 | [Expected Tools](expected-tools.md) | Main Agent 规划和派单、十个资料工具、数据快照、V0 搜索与 CodeGraph、V1 Hybrid RAG 候选设计 |
 | [Project README](../README.md) | 本地启动、模型配置、导入 Confluence、接入 Git 与 CodeGraph |
@@ -23,14 +24,14 @@ DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更�
 
 ## 版本路线图
 
-V0 的验收范围以 [PoC Requirements](poc-requirements.md) 为准。V1 和 V2+ 列出待评估的候选项目，实际投入取决于真实资料的联调与评估。
+V0 的验收范围以 [PoC Requirements](poc-requirements.md) 为准，当前完成情况见 [Current Status](current-status.md)。V1 和 V2+ 列出待评估的候选项目，实际投入取决于真实资料的联调与评估。
 
 | 能力 | V0 PoC 当前实现与待验证项 | V1 候选 | V2+ 候选 |
 | --- | --- | --- | --- |
 | 业务知识 | 用现有 Confluence 导出验证原文导入、目录与关键词检索、版本化阅读和证据溯源。在 `data/knowledge/wiki/` 预留主题 Wiki 目录 | 完善基线、术语表和别名。评估 OKF Generate Skill 整理主题 Wiki，以及 Wiki 专用检索和 Hybrid RAG | 经治理的规则目录，以及在需要复用规则、流程步骤和实体关系时评估业务知识图谱 |
-| 代码调查 | 支持单仓库、固定 Git 提交及 `.sh`、`.ps1` 的只读搜索和原文阅读。CodeGraph 有适配接口和合成数据 | 联调 `decision-engine-instant-decision-svc` 的 `dev` 分支、配置、测试、共享调用及 MDC 索引 | 跨服务、配置及事件依赖识别，持续更新索引 |
-| 影响分析 | 聊天和报告共用主 Agent 的自适应规划、多轮派单、历史发现和证据登记。支持可定位证据与报告内关联 | 加强任务与 findings 的证据关联，用历史需求 Golden Set 验证结论和证据 | 持久化规则、流程步骤、代码、配置与测试之间的关系，按需增加独立的 persona/simulation 验证 |
-| 产品交付 | Web UI 流式显示调查步骤和计划，SQLite 支持分析回放。已有测试覆盖离线与模拟模型网关。真实项目质量评估与部署验证待完成 | 内网联调、BA/Developer 验收、授权和数据治理 | 持续更新知识，支持团队复用与流程集成 |
+| 代码调查 | 单仓库固定 Git 提交、源码和配置及测试的只读检索；绑定真实 `decision-engine-instant-decision-svc` 的 `dev` 分支，复用 MDC Assistant 的 CodeGraph Tools 并验证索引与提交一致性 | 优化代码检索、共享调用识别和图覆盖 | 跨服务、配置及事件依赖识别，持续更新索引 |
+| 影响分析 | 聊天和报告共用主 Agent 的自适应规划、多轮派单、历史发现和证据登记。支持可定位证据与报告内关联 | 加强任务与 findings 的证据关联，扩展历史需求 Golden Set，提升结论和证据质量 | 持久化规则、流程步骤、代码、配置与测试之间的关系，按需增加独立的 persona/simulation 验证 |
+| 产品交付 | 桌面 Web UI 流式显示调查步骤和计划，SQLite 支持分析回放；内网联调、真实需求 PoC 验收与基线评估 | 扩展 BA/Developer 评估范围、授权和数据治理 | 持续更新知识，支持团队复用与流程集成 |
 
 ### 知识库分期
 
@@ -47,7 +48,7 @@ V0 从 `data/confluence/` 载入带清单的版本化 Markdown，验收原文导
 5. **加强任务和证据契约。** 为需求、任务和两侧 findings 建立结构化类型，校验结论与原文是否对齐。
 6. **按复用需求持久化关联。** 先用关联表或索引复用已核实的规则、步骤、代码、配置与测试关系。关系复杂度和重复调查量足以支撑投入时，再评估业务知识图谱。CodeGraph 继续用于代码静态依赖。
 
-V1 验收应能在真实变更上找到正确的规则和实现，列清直接修改与仅需验证的范围，并用原文说明理由。当前单工作线程且无账号隔离，适合受控 PoC。进入更广泛的部署前需验证授权、数据隔离、审计和容量。 [项目资料评估](poc-acceptance.md#项目资料上的评估)
+V0 真实需求验收应能在代表性变更上找到正确的规则和实现，列清直接修改与仅需验证的范围，并用原文说明理由。V1 在同一基线之上验证质量和效率改进。当前单工作线程且无账号隔离，适合受控 PoC。进入更广泛的部署前需验证授权、数据隔离、审计和容量。 [项目资料评估](poc-acceptance.md#项目资料上的评估)
 
 ## 源码导读
 

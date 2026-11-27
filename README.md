@@ -1,6 +1,6 @@
 # DHub Process Impact Analyser V0
 
-Business 或 Developer 输入拟议变更，网页实时显示调查步骤和计划，完成后呈现结构化影响报告。默认演示使用合成的 Confluence 页面、示例 Git 仓库和静态调用关系。内网已接通 Confluence 导出和 LLM，项目 PoC 的下一步是复用真实 CodeGraph 并跑通证据链。 [内网交接](docs/intranet-poc-handoff.md)
+Business 或 Developer 输入拟议变更，网页实时显示调查步骤和计划，完成后呈现结构化影响报告。默认演示使用合成的 Confluence 页面、示例 Git 仓库和静态调用关系。内网联调进度以 [Current Status](docs/current-status.md) 为准。 [内网交接](docs/intranet-poc-handoff.md)
 
 ## 当前 V0 工作流
 
@@ -26,7 +26,7 @@ Main 用版本化文档了解业务规则和设计意图，用固定 Git 提交�
 
 每个模型工具在 `dhub/tools/<工具名>.py` 中定义，例如 `search_code.py` 或 `read_document.py`。实现的签名、默认值和 docstring 决定模型可见的接口。 [全部工具文件](docs/expected-tools.md#1-tool-overview)
 
-新增资料工具时，在对应文件实现查询和 `TRACE_FIELDS`，再绑定到所属 Investigator 的 `toolset()`。需要生成证据的工具同时提供 `evidence_factory`。通用路径、查询、分页和派单函数放在 [tools/utils/](dhub/tools/utils/)。
+新增资料工具时，在对应文件实现查询和 `TRACE_FIELDS`，再绑定到所属 Investigator 的 `toolset()`。需要生成证据的工具同时提供 `evidence_factory`。通用资料路径校验、关键词匹配、文本读取边界和数据源错误处理放在 [sources/utils.py](dhub/sources/utils.py)；工具专用范围校验、分页、结果包装和派单放在 [tools/utils/](dhub/tools/utils/)。
 
 ### 其他源码入口
 
@@ -91,7 +91,7 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 
 ### 导入 Confluence
 
-内网已完成 Confluence 拉取，数据位于 `data/confluence/`。按 manifest 使用现有编码文件名的 Markdown 正文。需要重新导出时，可通过导出命令调用内网已有的 provider。 [已有导出如何接入](docs/intranet-poc-handoff.md#确认现有-confluence-导出可检索) · [导出器](dhub/sources/confluence.py)
+内网 Confluence 导出位于 `data/confluence/`。按 manifest 使用现有编码文件名的 Markdown 正文；接入和验证状态见 [Current Status](docs/current-status.md)。需要重新导出时，可通过导出命令调用内网已有的 provider。 [已有导出如何接入](docs/intranet-poc-handoff.md#确认现有-confluence-导出可检索) · [导出器](dhub/sources/confluence.py)
 
 ```powershell
 .\.venv\Scripts\python.exe -m dhub.sources.confluence --provider intranet_confluence:pull_pages --space SPACE_KEY --root-page-id ROOT_PAGE_ID --output data/confluence
@@ -137,4 +137,4 @@ Decision Process 的主要实现位于 `decision-engine-instant-decision-svc` �
 - `DHUB_DB_PATH` 默认是 `.local/runs.sqlite3`。其中保存分析需求、证据摘要、报告、Trace 和计划版本。转交内网时复制 `dhub/`、`demo/`、`docs/`、`tests/`、`requirements.txt`、`README.md`、`AGENTS.md`、`.env.example` 和 `.gitignore`。`AGENTS.md` 是内网 OpenCode 读取的项目约定。虚拟环境、`data/` 下的实际导出、凭证和运行库在目标环境准备。
 - 停止服务用 `Ctrl+C`。将要独立验证的历史请求放入不同数据库文件，便于区分演示和项目运行。
 
-[文档索引与路线图](docs/README.md) · [内网交接](docs/intranet-poc-handoff.md) · [总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)
+[当前进度](docs/current-status.md) · [文档索引与路线图](docs/README.md) · [内网交接](docs/intranet-poc-handoff.md) · [总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)

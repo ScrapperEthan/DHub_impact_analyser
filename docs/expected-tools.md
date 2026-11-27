@@ -336,7 +336,7 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 | 能力 | V0 | V1 候选 | 理想版本候选 |
 | --- | --- | --- | --- |
 | Domain tools | 上述 4 个，目录 + section 关键词检索、原文阅读 | 同一工具 API，Hybrid RAG、section embedding、检索融合、轻量 Wiki/术语导航 | 视评估增加业务关系查询及经治理的规则目录 |
-| Code tools | 上述 6 个，本地 Git + CodeGraph adapter | 接入真实 repo、真实 MDC 代码工具与 commit 对齐；优化检索和关系覆盖 | 跨仓库/服务/配置依赖自动识别 |
+| Code tools | 上述 6 个，本地 Git 与 CodeGraph adapter；内网绑定真实 repo、复用 MDC Assistant 的 CodeGraph Tools 和底层实现，并验证索引与 commit 对齐 | 优化检索和关系覆盖 | 跨仓库/服务/配置依赖自动识别 |
 | Main | 共用多轮调度，按证据选择业务或代码调查，按需发布和修订计划 | 加强任务与发现契约、证据核查 | 持久化业务技术关联、可选模拟验证 |
 
 Hybrid RAG 是 search_documents 的后端升级，不需要把关键词检索和向量检索拆成两个 Agent tool。配置/测试主要复用 search_code 与 read_file。暂不要求 Domain Knowledge Graph 查询工具、自动写代码工具、Synthetic Persona Simulation 工具；待真实需求与评估明确后再设计相应契约。
@@ -352,8 +352,8 @@ Hybrid RAG 是 search_documents 的后端升级，不需要把关键词检索和
 | CodeGraph 接入契约 | [codegraph.py](../dhub/sources/codegraph.py) | `BoundCodeGraphAdapter`、索引绑定与续读、合成图适配器 |
 | Domain 四个工具 | [Domain 注册](../dhub/tools/domain.py) · [Domain Investigator](../dhub/agents/domain.py) | 绑定知识快照并暴露目录、搜索和原文工具 |
 | Code 六个工具 | [Code 注册](../dhub/tools/code.py) · [Code Investigator](../dhub/agents/code.py) | 绑定 Git/CodeGraph 快照并暴露调查工具 |
-| 单项工具与共用逻辑 | [工具文件列表](#1-tool-overview) · [tools/utils/](../dhub/tools/utils/) | 每个工具一个实现文件，复用路径、搜索、分页和派单函数 |
+| 单项工具与共用逻辑 | [工具文件列表](#1-tool-overview) · [sources/utils.py](../dhub/sources/utils.py) · [tools/utils/](../dhub/tools/utils/) | 每个工具一个实现文件；数据源共用路径、匹配、读取逻辑与工具专用分页、范围检查、派单逻辑分开 |
 | 工具注册和模型输入 | [registry.py](../dhub/tools/registry.py) | 从工具函数签名和文档字符串建立 `StructuredTool` |
 | Tool calling、证据、Trace、预算 | [runtime.py](../dhub/agents/runtime.py) | `AgentRuntime.investigate`、`call_tool` |
 
-十个资料工具已有本地实现或适配契约。内网用已有 Confluence 导出和 LLM 网关，复用 MDC Assistant 的 CodeGraph 实现后在真实仓库上验收。Hybrid RAG 保留为 V1 候选。 [交接与验收](intranet-poc-handoff.md)
+十个资料工具的本地实现或适配契约见上表。真实仓库及复用版 CodeGraph 的接入和验收属于 V0；动态联调状态见 [Current Status](current-status.md)。Hybrid RAG 保留为 V1 候选。 [交接与验收](intranet-poc-handoff.md)

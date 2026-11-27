@@ -1,6 +1,6 @@
 # DHub PoC 内网交接
 
-**给内网 OpenCode。** Confluence 导出和 LLM 网关已在内网接通。复用现有导出、网关配置与凭证注入。现在需要把真实仓库和同一提交的 CodeGraph 索引绑定到 DHub，再用真实需求跑通文档、图调查、源码证据和影响报告。
+**给内网 OpenCode。** 先阅读 [Current Status](current-status.md#2-内网联调状态)，确认已完成项和待验证项。保留现有 Confluence 导出、可用 LLM provider、网关配置与凭证注入；不要重复实现已完成的接入。V0 完整验收需绑定真实仓库和同一提交的 CodeGraph 索引，并用真实需求核对文档、图调查、源码证据和影响报告。若已接入，仅核实和补齐缺口。
 
 ## 合并本轮目录调整
 
@@ -25,9 +25,9 @@
 
 Confluence 导出命令入口是 `python -m dhub.sources.confluence`。模型、配置和存储继续通过 `dhub.llm`、`dhub.config` 和 `dhub.store` 导入。
 
-## 原定 Confluence 知识库
+## Confluence 原文知识库
 
-V0 原文知识库原定放在项目的 `data/confluence/`。导出器把页版本的 Markdown 存到 `pages/`，用同层的 `manifest.json` 作目录。每条目录记录用 `page_id` 加 `version` 唯一标识页面正文。 [原始需求](poc-requirements.md#dhub-资料与决策基线) · [知识准备](agent-spec.md#知识准备与检索) · [导出器](../dhub/sources/confluence.py)
+V0 原文知识库使用项目的 `data/confluence/`。导出器把页版本的 Markdown 存到 `pages/`，用同层的 `manifest.json` 作目录。每条目录记录用 `page_id` 加 `version` 唯一标识页面正文。 [原始需求](poc-requirements.md#dhub-资料与决策基线) · [知识准备](agent-spec.md#知识准备与检索) · [导出器](../dhub/sources/confluence.py)
 
 ```text
 data/confluence/
@@ -39,7 +39,7 @@ data/confluence/
 
 逻辑目录沿用 Confluence 层级。用 `feature_drop` 表示 FD1–FD5，用 `ancestors` 保留从 Space 根到父页面的标题路径。例如 `Project Management → Core Product - FD2 → FD2 Requirements` 下的 `Decisioning Process`。Agent 可按 FD 或父页面过滤，再按 Markdown 标题定位章节。
 
-| 原定收录范围 | 页面内容 |
+| 目标收录范围 | 页面内容 |
 | --- | --- |
 | FD1–FD5 的 Requirements 与相关变更 | 业务需求、规则及适用范围、条件和例外、跨 FD 的变更、验收条件 |
 | FD2 的 Decisioning Process | 六阶段、21 步的初始导航，以及各步的说明。如 P5 Step 18 的 Frequency Cap 与豁免条件 |
@@ -101,7 +101,7 @@ python -c "from dhub.config import Settings; from dhub.sources.documents import 
 ## 固定仓库并复用 CodeGraph
 
 1. 在 `data/repositories.json` 登记 `decision-engine-instant-decision-svc` 的实际 Git checkout 路径和 `dev`，或本地可用的 `origin/dev`。已有单仓库配置可直接核对。在该业务仓库中执行 `git rev-parse --verify 'dev^{commit}'` 取得准备调查的 SHA，使用远程跟踪分支时将 `dev` 换成 `origin/dev`。
-2. 从内网当前版 **MDC Assistant 复用 CodeGraph 工具函数和底层查询、索引读取实现**。以实际版本的源码确定依赖边界。DHub 项目适配器直接调用复用代码，工厂使用 `DHUB_CODEGRAPH_ADAPTER=module:factory` 或 YAML 的 `codegraph_adapter` 注册。 [适配契约](../dhub/sources/codegraph.py)
+2. 从内网当前版 **MDC Assistant 复用 CodeGraph 工具函数和底层查询、索引读取实现**。以实际版本的源码确定依赖边界，不接入或依赖 MDC Assistant 应用本身。DHub 项目适配器直接调用复用代码，工厂使用 `DHUB_CODEGRAPH_ADAPTER=module:factory` 或 YAML 的 `codegraph_adapter` 注册。 [适配契约](../dhub/sources/codegraph.py)
 3. 实现 `index_info(repo_id, deadline=...)`，返回 `CodeGraphIndex`，提供索引实际对应的 `commit_sha`、稳定的 `index_id`、`provider` 和提供方已知的语言覆盖。SHA 应来自索引构建记录，并与第 1 步的 Git SHA 核对。
 4. 实现 `explore(repo_id=..., index=..., query=..., deadline=...)`。将同一索引和剩余时间传给底层操作，返回带实际索引绑定的 `CodeGraphResult`。已有文本用 `content` 保留，结构化关系用 `results`，并传递实际 `status`、`truncated` 和 `warnings`。DHub 对同次运行的结果分页，且会验证图查询前后的索引身份。 [图工具和分页](expected-tools.md#34-codegraph_explore)
 
@@ -143,4 +143,4 @@ codegraph_adapter: intranet_codegraph:create_adapter
 - 工具失败在 Trace 行内显示错误码，展开可看原因。同样的 `error`、`message` 和恢复提示会返回给调查员，派单结果中的 `tool_errors` 让 Main 判断重试、改查或记录缺口。
 - Git 失败保留 Git 自己的说明，例如 `Git said: fatal: detected dubious ownership`。服务账号与仓库属主不同时，按提示设置 `safe.directory`。
 
-完成标志是一份使用**内网实际 Confluence、LLM、Git 提交和复用版 CodeGraph** 生成的可回放影响报告，且关键结论能定位到真实文档和源码。用 [PoC 验收](poc-acceptance.md#项目资料上的评估) 扩展真实案例覆盖。
+V0 完整证据链验收的标志是一份使用**内网实际 Confluence、LLM、Git 提交和复用版 CodeGraph** 生成的可回放影响报告，且关键结论能定位到真实文档和源码。验收后更新 [Current Status](current-status.md)，不要将单次报告生成成功等同于完整证据链验收。用 [PoC 验收](poc-acceptance.md#项目资料上的评估) 扩展真实案例覆盖。
