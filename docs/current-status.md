@@ -2,7 +2,8 @@
 
 - 更新日期：2026-11-27
 - 当前阶段：V0 PoC / 内网联调
-- 最近本地验证的代码提交：`a5f6ade`（34 个单元测试全部通过）
+- 本地验证的应用代码：`a5f6ade`
+- 已推送的交接文档基线：`origin/main` 上的 `b21bf19`，包含 V0 验收范围、桌面端约定和内网交接说明。
 
 本文是项目动态进度的统一入口。区分本地已实现、自动化测试通过、内网已验证和待确认。需求范围、接口契约和未来路线图分别见 [PoC Requirements](poc-requirements.md)、[Expected Tools](expected-tools.md) 和 [Roadmap](README.md#版本路线图)。
 
@@ -19,7 +20,7 @@
 | 报告与可观测性 | 结构校验、证据引用校验、覆盖限制、工具失败原因、Trace、耗时和可用的 Token usage |
 | Web UI 与存储 | 桌面端分析和聊天、流式调查与计划、SQLite 报告历史及回放、浏览器本地聊天会话 |
 | 模型适配 | offline、Responses、Chat Completions 适配器；内网 provider 以实际环境为准 |
-| 自动化测试 | 2026-11-27 在本地执行 `python -m unittest discover -s tests -q`，34/34 通过；覆盖演示、临时 Git 仓库和模拟网关，不等同于真实资料验收 |
+| 自动化测试 | 2026-11-27 使用 `.venv` 的 Python 执行 `-m unittest discover -s tests -q`，34/34 通过，覆盖离线演示、临时 Git 仓库、模拟网关与 CodeGraph 及报告回放。真实资料验收见下节 |
 
 ## 2. 内网联调状态
 
