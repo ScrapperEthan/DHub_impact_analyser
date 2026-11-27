@@ -2,11 +2,10 @@
 
 import re
 
-from ..documents import Document, Section
+from ..sources.documents import Document, Section
+from ..sources.utils import SourceError, match_excerpt, query_tokens
 from .utils.document_scope import document_coverage, matches_scope
 from .utils.paging import bounded_size, search_page
-from .utils.search import match_excerpt, query_tokens
-from .utils.source import SourceError
 
 
 TRACE_FIELDS = ("query", "feature_drop", "ancestor", "page_id", "version", "limit")

@@ -3,9 +3,9 @@
 import re
 from typing import Literal
 
-from ..repositories import CODE_EXTENSIONS, parse_glob
+from ..sources.repositories import CODE_EXTENSIONS, parse_glob
+from ..sources.utils import SourceError, relative_path
 from .utils.paging import bounded_size, search_page
-from .utils.source import SourceError, relative_path
 
 
 TRACE_FIELDS = ("query", "queries", "repo_ids", "path_prefix", "extensions", "glob", "mode", "limit")

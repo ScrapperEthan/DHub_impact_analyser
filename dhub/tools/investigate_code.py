@@ -2,7 +2,7 @@
 
 from collections.abc import Callable
 
-from ..planning import TaskId
+from ..agents.planning import TaskId
 from .registry import ToolDefinition, define_tool
 
 

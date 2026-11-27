@@ -226,4 +226,4 @@ FastAPI 以单工作线程排队执行分析，SQLite 保存状态、报告和�
 - **Report** 由 Pydantic 校验。现有支持状态为 `supported`、`partially_supported`、`change_required` 或 `unknown`。影响项的 `kind` 对应流程、规则、代码、配置、测试、下游或冲突，`effect` 表示直接变更、间接影响或需核实，`status` 表示已确认、潜在或未知。`related_item_ids` 记录本次报告内的关联，回归场景保留 `given`、`before`、`proposed` 和证据引用。
 - **ground_report** 去掉未知证据 ID 和无效关联。没有有效引用的现有支持或确认项降为 `unknown`，无证据的场景清空 `before`。当前校验的范围是引用能否定位，引用是否支持具体结论仍需核对原文。超时、缺资料等限制随报告返回。
 
-[角色实现](../dhub/agents/) · [AgentRuntime](../dhub/agent_runtime.py) · [Report schema 与 ground_report](../dhub/report.py)
+[角色实现](../dhub/agents/) · [AgentRuntime](../dhub/agents/runtime.py) · [Report schema 与 ground_report](../dhub/reports/impact.py)

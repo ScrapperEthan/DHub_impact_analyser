@@ -14,12 +14,12 @@ from unittest.mock import patch
 import httpx
 from fastapi.testclient import TestClient
 
-from dhub.agent_runtime import TIME_LIMIT, TOOL_LIMIT, run_deadline
+from dhub.agents.runtime import TIME_LIMIT, TOOL_LIMIT, run_deadline
 from dhub.analyzer import DEMO_REQUIREMENT, analyze
 from dhub.app import create_app
 from dhub.config import LLMConfig, Settings
-from dhub.llm import ChatResult, LLMError, LocalResponses
-from dhub.sources import Sources
+from dhub.llm import ChatResult, LLMError, LocalResponses, OpenAIChat
+from dhub.sources.manager import Sources
 
 
 PROMPT_DIR = Path(__file__).resolve().parent.parent / "dhub" / "prompts"
@@ -266,6 +266,13 @@ class ChatTest(unittest.TestCase):
                 [json.loads(line)["type"] for line in response.iter_lines()],
                 ["agent.started", "agent.finished", "chat.completed"],
             )
+            streamed = [json.loads(line) for line in client.post(
+                "/api/chat/stream", json={"message": "What is Frequency Cap?"},
+            ).iter_lines()]
+            self.assertEqual([event["type"] for event in streamed[-2:]], ["chat.evidence", "chat.completed"])
+            evidence, = streamed[-2]["evidence"]
+            self.assertEqual((evidence["evidence_id"], evidence["page_id"]), ("E1", "DEMO-FD2"))
+            self.assertIn("[E1]", streamed[-1]["reply"])
 
     def test_model_chat_continues_history_and_uses_original_investigators(self):
         with TemporaryDirectory() as directory, ConversationGateway() as gateway:
@@ -298,6 +305,62 @@ class ChatTest(unittest.TestCase):
             finally:
                 gateway.shutdown()
                 thread.join()
+
+
+class ModelFailureTest(unittest.TestCase):
+    def gateway(self, handler):
+        config = LLMConfig(provider="openai_chat", base_url="http://gateway.test/v1", model="m", api_key="sk-secret-key")
+        client = OpenAIChat(config, transport=httpx.MockTransport(handler))
+        return config, patch("dhub.agents.runtime.create_client", return_value=client)
+
+    def test_gateway_error_fails_the_run_with_a_masked_cause(self):
+        def rejected(request):
+            return httpx.Response(401, json={"error": {"message": "Invalid API key sk-secret-key"}})
+
+        config, gateway = self.gateway(rejected)
+        with TemporaryDirectory() as directory, gateway:
+            settings = Settings(db_path=Path(directory) / "runs.sqlite3", llm=config)
+            status, report, detail = analyze(settings, DEMO_REQUIREMENT, lambda _: None, lambda _: None)
+            self.assertEqual(status, "failed")
+            self.assertIn("HTTP 401. Invalid API key [redacted]", detail)
+            self.assertEqual(report["evidence"], [])
+            with TestClient(create_app(settings)) as client:
+                snapshot, _ = PoCTest.run_case(self, client)
+                chat = client.post("/api/chat", json={"message": "What is Frequency Cap?"})
+                listed, = client.get("/api/runs").json()["runs"]
+        self.assertEqual(snapshot["status"], "failed")
+        self.assertIn("HTTP 401", snapshot["error"])
+        self.assertEqual(listed["status"], "failed")
+        self.assertEqual(chat.status_code, 502)
+        self.assertIn("HTTP 401", chat.json()["detail"])
+        self.assertNotIn("sk-secret-key", json.dumps([snapshot, chat.json()]))
+
+    def test_connection_error_and_invalid_report_are_failed_not_partial(self):
+        def refused(request):
+            raise httpx.ConnectError("connection refused", request=request)
+
+        config, gateway = self.gateway(refused)
+        with gateway:
+            status, _, detail = analyze(Settings(llm=config), DEMO_REQUIREMENT, lambda _: None, lambda _: None)
+        self.assertEqual(status, "failed")
+        self.assertIn("Unable to connect to the model gateway (ConnectError: connection refused)", detail)
+
+        model = SimpleNamespace(chat=lambda *_args, **_kwargs: ChatResult({"role": "assistant", "content": "not json"}, {}))
+        with patch("dhub.agents.runtime.create_client", return_value=model):
+            status, report, detail = analyze(Settings(llm=config), DEMO_REQUIREMENT, lambda _: None, lambda _: None)
+        self.assertEqual(status, "failed")
+        self.assertIn("valid JSON object", detail)
+        self.assertTrue(any("valid JSON object" in gap for gap in report["open_questions"]))
+
+    def test_token_usage_is_summed_across_model_calls(self):
+        usage = {"prompt_tokens": 10, "completion_tokens": 4, "total_tokens": 14}
+        response = {"report": {"requirement_summary": "r", "summary": "s"}}
+        model = SimpleNamespace(chat=lambda *_args, **_kwargs: ChatResult(ChatGateway._json_message(response), usage))
+        with patch("dhub.agents.runtime.create_client", return_value=model), \
+                self.assertLogs("dhub.analyzer", level="INFO") as logs:
+            status, _, _ = analyze(Settings(llm=LLMConfig(provider="openai_chat")), "r", lambda _: None, lambda _: None)
+        self.assertEqual(status, "succeeded")
+        self.assertIn("tokens input=10, output=4, total=14", logs.output[-1])
 
 
 def tool_request(name, arguments, call_id=None):
@@ -396,7 +459,7 @@ class AdaptivePlanningTest(unittest.TestCase):
             settings = Settings(
                 db_path=Path(directory) / "runs.sqlite3", llm=LLMConfig(provider="openai_chat", api_key="test-token"),
             )
-            with patch("dhub.agent_runtime.create_client", return_value=SimpleNamespace(chat=chat)):
+            with patch("dhub.agents.runtime.create_client", return_value=SimpleNamespace(chat=chat)):
                 with TestClient(create_app(settings)) as client:
                     response = client.post("/api/chat/stream", json={"message": DEMO_REQUIREMENT})
                     self.assertEqual(response.headers["content-type"], "application/x-ndjson")
@@ -532,7 +595,7 @@ class LocalResponsesTest(unittest.TestCase):
         model = LocalResponses(config, transport=httpx.MockTransport(complete))
         with TemporaryDirectory() as directory:
             settings = Settings(db_path=Path(directory) / "runs.sqlite3", llm=config)
-            with patch("dhub.agent_runtime.create_client", return_value=model), TestClient(create_app(settings)) as client:
+            with patch("dhub.agents.runtime.create_client", return_value=model), TestClient(create_app(settings)) as client:
                 response = client.post("/api/chat/stream", json={"message": "What is Frequency Cap?"})
         events = [json.loads(line) for line in response.iter_lines()]
         self.assertEqual(events[-1]["type"], "chat.completed")
@@ -590,7 +653,7 @@ class ProjectRepositoryTest(unittest.TestCase):
             )
             response = {"report": {"requirement_summary": "Verify the scripts", "summary": "Fixture report"}}
             model = SimpleNamespace(chat=lambda *_args, **_kwargs: ChatResult(ChatGateway._json_message(response), {}))
-            with patch("dhub.agent_runtime.create_client", return_value=model):
+            with patch("dhub.agents.runtime.create_client", return_value=model):
                 with patch("dhub.analyzer.load_codegraph", return_value=codegraph):
                     status, report, detail = analyze(config, "Verify the scripts", lambda _: None, lambda _: None)
                     self.assertEqual((status, report["open_questions"], detail), ("succeeded", [], None))
@@ -601,7 +664,7 @@ class ProjectRepositoryTest(unittest.TestCase):
 
 class AgentBudgetTest(unittest.TestCase):
     def test_deadline_defaults_to_five_minutes_and_allows_shorter_overrides(self):
-        with patch("dhub.agent_runtime.monotonic", return_value=10):
+        with patch("dhub.agents.runtime.monotonic", return_value=10):
             self.assertEqual(run_deadline(Settings()), 310)
             self.assertEqual(run_deadline(Settings(run_timeout=3600)), 310)
             self.assertEqual(run_deadline(Settings(run_timeout=70)), 80)
@@ -630,7 +693,7 @@ class AgentBudgetTest(unittest.TestCase):
 
         events = []
         settings = Settings(llm=LLMConfig(provider="openai_chat"))
-        with patch("dhub.agent_runtime.create_client", return_value=SimpleNamespace(chat=chat)):
+        with patch("dhub.agents.runtime.create_client", return_value=SimpleNamespace(chat=chat)):
             status, report, _ = analyze(settings, DEMO_REQUIREMENT, events.append, lambda snapshot: None)
         self.assertEqual(status, "partial")
         self.assertEqual(delegations, 13)
@@ -660,7 +723,7 @@ class AgentBudgetTest(unittest.TestCase):
         settings = Settings(run_timeout=1, llm=LLMConfig(provider="openai_chat"))
         events = []
         try:
-            with patch("dhub.agent_runtime.create_client", return_value=SimpleNamespace(chat=chat)):
+            with patch("dhub.agents.runtime.create_client", return_value=SimpleNamespace(chat=chat)):
                 start = time.monotonic()
                 status, report, _ = analyze(settings, DEMO_REQUIREMENT, events.append, lambda snapshot: None)
                 self.assertLess(time.monotonic() - start, 3)
@@ -752,6 +815,12 @@ class PoCTest(unittest.TestCase):
             with TestClient(create_app(settings)) as client:
                 base_url = f"/api/runs/{snapshot['run_id']}"
                 self.assertEqual(client.get(base_url).json(), snapshot)
+                listed, = client.get("/api/runs").json()["runs"]
+                self.assertEqual(
+                    (listed["run_id"], listed["status"], listed["requirement"]),
+                    (snapshot["run_id"], "succeeded", DEMO_REQUIREMENT),
+                )
+                self.assertNotIn("report", listed)
                 replay = client.get(f"{base_url}/events", params={"after_seq": 5}).json()
                 self.assertEqual(replay, {"events": events[5:], "next_after_seq": events[-1]["seq"]})
                 streamed = client.get(f"{base_url}/stream", params={"after_seq": 5})

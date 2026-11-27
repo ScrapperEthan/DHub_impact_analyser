@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+from time import monotonic
 
-from .codegraph import BoundCodeGraphAdapter
+from ..tools.code import CodeTools
+from ..tools.domain import DomainTools
+from .codegraph import BoundCodeGraphAdapter, CodeGraphAdapter, DemoCodeGraph
 from .documents import Knowledge
-from .repositories import DEMO_ROOT, DemoCodeGraph, Repository
-from .repositories import CodeGraphAdapter as CodeGraphAdapter
-from .tools.code import CodeTools
-from .tools.domain import DomainTools
-from .tools.utils.source import SourceError as SourceError
+from .repositories import Repository
+from .utils import DEMO_ROOT
 
+log = logging.getLogger(__name__)
 
 class Sources:
     """Construct one instance per analysis run to isolate snapshots and graph results."""
@@ -33,7 +35,13 @@ class Sources:
                 {"repo_id": repo_id, "path": DEMO_ROOT / repo_id}
                 for repo_id in ("fixture-decision", "fixture-channel")
             ]
+        start = monotonic()
         self.knowledge = Knowledge(Path(manifest_path).resolve() if manifest_path else None)
+        log.info(
+            "Knowledge snapshot: %s, %d pages, %d skipped, %.2f s",
+            self.knowledge.error or "available", len(self.knowledge.documents),
+            len(self.knowledge.skipped_pages), monotonic() - start,
+        )
         self.repositories: dict[str, Repository] = {}
         for entry in repositories or []:
             repo = Repository(
@@ -42,11 +50,20 @@ class Sources:
             )
             if repo.repo_id in self.repositories:
                 raise ValueError("Repository IDs must be unique")
+            start = monotonic()
             repo.pin()
+            log.info(
+                "Repository %s pinned at %s, %d readable files, %.2f s",
+                repo.repo_id, repo.commit_sha or "unavailable", len(repo.files), monotonic() - start,
+            )
             self.repositories[repo.repo_id] = repo
         self.codegraph = DemoCodeGraph(self.repositories) if data_mode == "demo" else codegraph
         self.domain = DomainTools(self.knowledge)
+        start = monotonic()
         self.code = CodeTools(self.repositories, self.codegraph)
+        for repo_id, error in self.code.graph.errors.items():
+            log.info("CodeGraph unavailable for %s: %s (%s)", repo_id, error.code, error)
+        log.info("CodeGraph index lookup: %d indexes bound, %.2f s", len(self.code.graph.indexes), monotonic() - start)
         self.graph_results = self.code.graph_results
 
         # Direct source calls use the same methods as the agent toolsets.

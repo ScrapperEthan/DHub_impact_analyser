@@ -1,4 +1,4 @@
-"""Schema for the Main Agent's optional investigation plan."""
+"""Main Agent investigation-plan schemas and task validation."""
 
 from typing import Annotated, Literal
 

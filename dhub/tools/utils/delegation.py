@@ -6,9 +6,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from ...agent_runtime import AgentRuntime, State
     from ...agents.code import CodeInvestigator
     from ...agents.domain import DomainKnowledgeInvestigator
+    from ...agents.runtime import AgentRuntime, State
 
 
 def run_investigation(

@@ -48,8 +48,50 @@ const reportBody = document.getElementById("report");
 const planHost = document.getElementById("plan");
 const traceBody = document.getElementById("trace");
 const traceCount = document.getElementById("trace-count");
+const historyPanel = document.getElementById("history");
+const historyList = document.getElementById("history-list");
+const historyCount = document.getElementById("history-count");
+const historyEmpty = document.getElementById("history-empty");
 const terminal = new Set(["succeeded", "partial", "failed"]);
 let activeRun;
+
+function formatDate(value) {
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString([], { dateStyle: "short", timeStyle: "short", hour12: false });
+}
+
+function markActiveHistory() {
+  for (const button of historyList.querySelectorAll(".history-item")) {
+    button.toggleAttribute("aria-current", button.dataset.runId === activeRun?.id);
+  }
+}
+
+async function loadHistory() {
+  try {
+    const { runs } = await fetchJson("/api/runs?limit=50");
+    historyCount.textContent = runs.length === 1 ? "1 run" : `${runs.length} runs`;
+    historyEmpty.hidden = runs.length > 0;
+    historyList.replaceChildren(...runs.map(run => {
+      const button = element("button", "history-item");
+      button.type = "button";
+      button.dataset.runId = run.run_id;
+      button.title = run.requirement;
+      const meta = [label(modes, run.data_mode), formatDate(run.created_at)].filter(Boolean).join(" · ");
+      button.append(tag(run.status), element("span", "history-requirement", run.requirement), element("span", "muted history-meta", meta));
+      button.addEventListener("click", () => {
+        if (activeRun?.id === run.run_id) return;
+        requirement.value = "";
+        openRun(run.run_id, run.status);
+      });
+      const item = element("li");
+      item.append(button);
+      return item;
+    }));
+    markActiveHistory();
+  } catch {
+    historyCount.textContent = "Unavailable";
+  }
+}
 
 function setNotice(message = "") {
   notice.textContent = message;
@@ -101,27 +143,6 @@ function formatList(value) {
     list.append(row);
   }
   return list;
-}
-
-function formatLocator(evidence) {
-  if (evidence.source_type === "code") {
-    const lines = evidence.start_line
-      ? " L" + evidence.start_line + (evidence.end_line > evidence.start_line ? "–" + evidence.end_line : "")
-      : "";
-    return [
-      evidence.repo_id,
-      (evidence.path || "") + lines,
-      evidence.commit_sha ? "Commit " + evidence.commit_sha : "",
-      evidence.symbol,
-    ].filter(Boolean).join(" · ");
-  }
-  return [
-    evidence.title || evidence.page_id,
-    evidence.section,
-    evidence.version ? "Version " + evidence.version : "",
-    evidence.feature_drop,
-    evidence.title && evidence.page_id ? "Page " + evidence.page_id : "",
-  ].filter(Boolean).join(" · ");
 }
 
 function evidenceUrl(value) {
@@ -321,6 +342,7 @@ async function followRun(run) {
     renderSnapshot(run, snapshot);
     setNotice(errorMessage(snapshot.error));
     if (!run.trace.spans.size) run.traceEmpty.textContent = "This run has no investigation steps.";
+    void loadHistory();
   } catch (error) {
     if (activeRun !== run || error.name === "AbortError") return;
     if (error.status === 404) {
@@ -344,6 +366,7 @@ function openRun(id, status = "queued") {
   window.history.replaceState(null, "", url);
   const traceEmpty = element("p", "muted empty-state", "Waiting for investigation steps.");
   const run = {
+    id,
     path: "/api/runs/" + encodeURIComponent(id),
     cursor: 0,
     finished: false,
@@ -361,6 +384,7 @@ function openRun(id, status = "queued") {
   traceBody.replaceChildren(traceEmpty);
   traceCount.textContent = "0 tool calls";
   reportBody.replaceChildren(element("p", "muted empty-state", "Loading the analysis run."));
+  markActiveHistory();
   void followRun(run);
 }
 
@@ -387,6 +411,7 @@ form.addEventListener("submit", async (event) => {
     });
     if (!created.run_id) throw new Error("The server did not return a run ID.");
     openRun(created.run_id, created.status);
+    void loadHistory();
   } catch (error) {
     setNotice("Unable to start analysis. " + error.message);
   } finally {
@@ -394,5 +419,10 @@ form.addEventListener("submit", async (event) => {
   }
 });
 
+historyPanel.addEventListener("toggle", () => {
+  if (historyPanel.open) void loadHistory();
+});
+
 const requestedRun = new URLSearchParams(window.location.search).get("run");
 if (requestedRun) openRun(requestedRun);
+void loadHistory();

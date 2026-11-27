@@ -7,6 +7,7 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 | 方法与路径 | 契约 |
 | --- | --- |
 | `POST /api/runs` | 接收 `{"requirement":"…"}`，去掉首尾空白后应有文本。创建记录后返回 `202` 和 `{run_id, status}`。空白或格式无效返回 `422` |
+| `GET /api/runs?limit=50` | 按创建时间倒序返回 `{"runs":[…]}`，每项含 `run_id`、`requirement`（前 300 字符）、`data_mode`、`status`、`created_at`、`finished_at`，不含报告和 Trace。`limit` 为 1–200 |
 | `GET /api/runs/{run_id}` | 返回 `run_id`、`status`、`data_mode`、`source_snapshot`、`report` 和可读的 `error`（如有）。报告生成前 `report` 为 `null` |
 | `GET /api/runs/{run_id}/events?after_seq=0` | 返回序号大于 `after_seq` 的事件，按 `seq` 递增。响应包含 `events` 和 `next_after_seq`，空列表沿用游标。可以用固定页长分批读取 |
 | `GET /api/runs/{run_id}/stream?after_seq=0` | 随运行逐条发送同一事件序列。收到终态事件后结束，可用最后处理的 `seq` 恢复读取 |
@@ -19,12 +20,12 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 | --- | --- |
 | `queued` / `running` | 已接收，等待执行或调查进行中 |
 | `succeeded` | 已交付有效报告。报告可以包含覆盖范围内仍需业务方确认的问题 |
-| `partial` | 关键调查受限但已有可用报告，例如资料缺失、工具超时、预算用尽或需求范围不足。报告解释缺口 |
-| `failed` | 无法交付可用报告。错误与已发生的 Trace 仍可查看 |
+| `partial` | 关键调查受限但已有可用报告，例如资料缺失、工具超时、预算或运行时限用尽、需求范围不足。报告解释缺口 |
+| `failed` | 模型没有交付报告，例如网关错误、连接失败、请求超时或报告两次不符合结构。`error` 写明原因并遮盖凭证。失败前登记的证据保留在 `report.evidence`，Trace 仍可查看 |
 
 流式接口使用 `application/x-ndjson`，每个 UTF-8 JSON 对象占一行。分析页断线后从最近的 `seq` 继续，刷新可用相同 `run_id` 回放计划与 Trace。服务端在同一事务中保存报告（如有）、运行终态和 `run.finished`。进程重启后，中断运行进入 `failed`，打开的调用以中断原因结尾，已有事件可回看。
 
-聊天事件按到达顺序处理，终态为 `{"type":"chat.completed","reply":"…"}` 或 `{"type":"chat.error","status":502,"detail":"…"}`，其中 `status` 是语义状态码。请求体校验仍返回 HTTP `422`。聊天页面保留当前会话中的调查步骤和计划，刷新时从标签页会话恢复问答文本。最终聊天文本在校验后随 `chat.completed` 发送，分析报告随终态从运行快照读取。
+聊天事件按到达顺序处理，终态为 `{"type":"chat.completed","reply":"…"}` 或 `{"type":"chat.error","status":502,"detail":"…"}`，其中 `status` 是语义状态码。本轮登记了证据时，终态前先发送 `{"type":"chat.evidence","evidence":[…]}`，结构与报告证据相同，`excerpt` 最多 2000 字符，超出时标记 `excerpt_truncated`。证据 ID 在每轮聊天内从 E1 编号。请求体校验仍返回 HTTP `422`。聊天页面把会话列表和问答文本（含各轮证据）保存在浏览器 `localStorage`，每个标签页记住当前会话。调查步骤和计划只在当前页面显示。最终聊天文本在校验后随 `chat.completed` 发送，分析报告随终态从运行快照读取。
 
 ## 影响报告约定
 
@@ -59,7 +60,7 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 | 字段或规则 | 用途 |
 | --- | --- |
 | `run_id`、`seq`、`at` | 分析事件附有运行 ID、连续递增序号及 ISO 8601 时间 |
-| `type` | `run.started`、`run.finished`、`agent.started`、`agent.finished`、`tool.started`、`tool.finished`、`plan.updated` 或聊天终态 |
+| `type` | `run.started`、`run.finished`、`agent.started`、`agent.finished`、`tool.started`、`tool.finished`、`plan.updated`、聊天的 `chat.evidence` 或聊天终态 |
 | `span_id`、`parent_span_id`、`agent_id` | 关联同一事件对和调用层级。Run 是根。`agent_id` 为 `main`、`domain`、`code`，Run 事件可为空 |
 | `status`、`elapsed_ms` | 开始时为 `running`。结束时记录实际结果和耗时。工具结束可为 `succeeded`、`partial`、`failed` 或 `timeout` |
 | `stage` 或 `tool_name` | Agent 任务摘要或实际工具名。重复调用各有自己的 `span_id` |
@@ -87,6 +88,8 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 Trace 的可见内容限于执行事实和获准展示的业务摘要。服务端在保存事件前过滤凭证、敏感参数和长原文，前端按文本安全显示。工具尚在运行时可看到开始事件，工具失败时同一行显示失败原因。前端按 `seq` 去重并用 `span_id` 合并开始和结束事件。
 
 CodeGraph 查询与续读用 `result_ref` 关联 Trace。Trace 记录来源名称、返回量、捕获量、续读状态、截断和警告数量。原始查询、图正文、provider 警告文本和可续读的 `result_id` 留在调查工具调用中。`retrieval_coverage` 将实际搜索和图状态传给 Main。
+
+工具失败时，Trace 行在状态旁显示 `error_code`，展开后显示 `error_summary`。调查员收到同一失败的结构化结果 `{error, message, tool, status, input, hint}`，其中 `input` 是 Trace 白名单参数，`hint` 给出改正参数、换用工具或记录缺口的建议。Investigator 的 findings 带 `tool_errors`，列出本次派单中失败的工具、错误码、说明和参数摘要，供 Main 重试、改派或更新计划。所有错误文本都经过与 Trace 相同的脱敏。
 
 ## 调查计划事件
 
@@ -117,6 +120,8 @@ CodeGraph 查询与续读用 `result_ref` 关联 Trace。Trace 记录来源名�
 ## 页面要求
 
 - **输入区**提供 **Change Request** 文本框、**Use Example** 和 **Run Analysis**。创建运行后显示当前状态和资料模式。
+- **Report History** 是可收起的列表，显示最近 50 次运行的状态、需求、资料模式和时间。点击一项载入该运行的报告、计划和 Trace，当前运行高亮。
+- **聊天页**左侧列出已保存的会话，**New Chat** 开始新会话。回复中的 `[E3]` 等证据 ID 可点击，打开回复下方 **Sources** 中的原文摘录。当前页面产生的回复还可用 **View Tool Call** 跳到对应工具调用。
 - **报告区**把摘要和适用范围放在前面，随后展示影响项、风险或冲突、回归建议和待确认项。用 **Evidence-backed**、**Potential** 和 **Unverified** 标识证据状态。点击一条证据可查看来源定位，并高亮对应工具调用。
 - **Trace 区**按时间显示三个 Agent 的任务和下挂的工具调用。角色用名称、颜色和缩进识别，例如主 Agent 用蓝、业务调查用紫、代码调查用绿。每行显示工具名、状态和时间或耗时，展开后可看到参数摘要、命中数、证据 ID 和错误摘要。
 - **调查计划**展示版本、完成计数、范围、候选步骤、任务状态、修订原因和证据链接。用 **Previous Version** 和 **Next Version** 回看变化。聊天页的证据链接指向对应工具调用。

@@ -1,6 +1,10 @@
 import { renderChatReply } from "./chat-render/markdown.js";
 
-const HISTORY_KEY = "dhub.chat.history.v1";
+// Sessions live in this browser only. The server receives the active session's recent turns.
+const SESSIONS_KEY = "dhub.chat.sessions.v1";
+const ACTIVE_KEY = "dhub.chat.active.v1";
+const LEGACY_HISTORY_KEY = "dhub.chat.history.v1";
+const MAX_SESSIONS = 30;
 const MAX_CONTEXT_TURNS = 12;
 const form = document.querySelector("#chat-form");
 const input = document.querySelector("#chat-input");
@@ -10,29 +14,172 @@ const scrollArea = document.querySelector("#chat-scroll");
 const transcript = document.querySelector("#chat-history");
 const empty = document.querySelector("#chat-empty");
 const feedback = document.querySelector("#chat-status");
-const turns = loadTurns();
+const sessionList = document.querySelector("#session-list");
+const sessionEmpty = document.querySelector("#session-empty");
+const sessions = loadSessions();
+let active = sessions.find(session => session.id === readStorage(sessionStorage, ACTIVE_KEY)) ?? newSession();
 let pending = false;
 
-function loadTurns() {
+function readStorage(storage, key) {
   try {
-    const saved = JSON.parse(sessionStorage.getItem(HISTORY_KEY));
-    return Array.isArray(saved) ? saved.filter(turn =>
-      typeof turn?.user === "string" && typeof turn.assistant === "string"
-    ) : [];
+    return storage.getItem(key);
   } catch {
-    return [];
+    return null;
   }
 }
 
-function saveTurns() {
+function validTurns(value) {
+  return Array.isArray(value) ? value.filter(turn =>
+    typeof turn?.user === "string" && typeof turn.assistant === "string"
+  ) : [];
+}
+
+function newSession(turns = []) {
+  const id = globalThis.crypto?.randomUUID?.() ?? String(Date.now()) + Math.random().toString(16).slice(2);
+  return { id, title: turns[0]?.user.slice(0, 80) ?? "", updated_at: new Date().toISOString(), turns };
+}
+
+function loadSessions() {
+  let saved = [];
   try {
-    sessionStorage.setItem(HISTORY_KEY, JSON.stringify(turns));
+    const data = JSON.parse(readStorage(localStorage, SESSIONS_KEY));
+    saved = Array.isArray(data) ? data.filter(session => typeof session?.id === "string") : [];
   } catch {
-    // Keep the active conversation in memory if storage is unavailable.
+    saved = [];
+  }
+  for (const session of saved) session.turns = validTurns(session.turns);
+  // Keep a conversation saved by the previous single-session page.
+  try {
+    const legacy = validTurns(JSON.parse(sessionStorage.getItem(LEGACY_HISTORY_KEY)));
+    sessionStorage.removeItem(LEGACY_HISTORY_KEY);
+    if (legacy.length) {
+      const session = newSession(legacy);
+      saved.unshift(session);
+      sessionStorage.setItem(ACTIVE_KEY, session.id);
+    }
+  } catch {
+    // Ignore unreadable storage.
+  }
+  return saved.filter(session => session.turns.length);
+}
+
+function saveSessions() {
+  sessions.sort((left, right) => right.updated_at.localeCompare(left.updated_at));
+  sessions.splice(MAX_SESSIONS);
+  for (;;) {
+    try {
+      localStorage.setItem(SESSIONS_KEY, JSON.stringify(sessions));
+      return;
+    } catch {
+      // Drop the oldest other session when browser storage is full.
+      const index = sessions.findLastIndex(session => session !== active);
+      if (index < 0) return;
+      sessions.splice(index, 1);
+    }
   }
 }
 
-function appendMessage(role, text) {
+function rememberActive() {
+  try {
+    sessionStorage.setItem(ACTIVE_KEY, active.id);
+  } catch {
+    // The active session stays in memory.
+  }
+}
+
+function formatSessionTime(value) {
+  const time = new Date(value);
+  return Number.isNaN(time.getTime()) ? "" : time.toLocaleString([], { dateStyle: "short", timeStyle: "short", hour12: false });
+}
+
+function renderSessions() {
+  sessionEmpty.hidden = sessions.length > 0;
+  sessionList.replaceChildren(...sessions.map(session => {
+    const button = element("button", "session-item");
+    button.type = "button";
+    button.disabled = pending;
+    button.title = session.title;
+    button.toggleAttribute("aria-current", session === active);
+    const turns = session.turns.length === 1 ? "1 message" : `${session.turns.length} messages`;
+    button.append(
+      element("span", "session-title", session.title || "Untitled chat"),
+      element("span", "muted session-meta", `${formatSessionTime(session.updated_at)} · ${turns}`),
+    );
+    button.addEventListener("click", () => openSession(session));
+    const item = element("li");
+    item.append(button);
+    return item;
+  }));
+}
+
+function evidenceSources(message, evidence, activity) {
+  const byId = new Map();
+  if (!evidence?.length) return byId;
+  const sources = element("details", "chat-sources");
+  sources.append(element("summary", "", evidence.length === 1 ? "1 source" : `${evidence.length} sources`));
+  const list = element("div", "result-list");
+  let highlighted;
+  for (const entry of evidence) {
+    const details = element("details", "result-item evidence-item");
+    details.append(element("summary", "", [entry.evidence_id, formatLocator(entry)].filter(Boolean).join(" · ")));
+    if (entry.excerpt) {
+      details.append(element("pre", "", entry.excerpt + (entry.excerpt_truncated ? "\n…" : "")));
+    }
+    if (activity && entry.tool_span_id) {
+      const jump = element("button", "button subtle", "View Tool Call");
+      jump.type = "button";
+      jump.addEventListener("click", () => {
+        activity.steps.open = true;
+        activity.trace.highlightSpan(entry.tool_span_id, true);
+      });
+      const actions = element("div", "evidence-actions");
+      actions.append(jump);
+      details.append(actions);
+    }
+    list.append(details);
+    byId.set(entry.evidence_id, () => {
+      sources.open = true;
+      details.open = true;
+      highlighted?.classList.remove("evidence-target");
+      details.classList.add("evidence-target");
+      highlighted = details;
+      details.scrollIntoView({ block: "center" });
+      if (activity) activity.trace.highlightSpan(entry.tool_span_id);
+    });
+  }
+  sources.append(list);
+  message.append(sources);
+  return byId;
+}
+
+function linkCitations(content, openers) {
+  if (!openers.size) return;
+  const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    if (!node.parentElement.closest("pre, a, button") && /\bE\d+\b/.test(node.data)) nodes.push(node);
+  }
+  for (const node of nodes) {
+    const parts = node.data.split(/\b(E\d+)\b/);
+    const fragment = document.createDocumentFragment();
+    parts.forEach((part, index) => {
+      const open = index % 2 ? openers.get(part) : null;
+      if (!open) {
+        if (part) fragment.append(part);
+        return;
+      }
+      const button = element("button", "citation-link", part);
+      button.type = "button";
+      button.title = "Show evidence " + part;
+      button.addEventListener("click", open);
+      fragment.append(button);
+    });
+    node.replaceWith(fragment);
+  }
+}
+
+function appendMessage(role, text, evidence = [], activity = null) {
   const message = element("article", `chat-message chat-message-${role}`);
   const content = role === "assistant"
     ? renderChatReply(text, updateReplyLayout)
@@ -41,6 +188,7 @@ function appendMessage(role, text) {
     element("p", "chat-speaker", role === "user" ? "You" : "DHub Agent"),
     content,
   );
+  if (role === "assistant") linkCitations(content, evidenceSources(message, evidence, activity));
   transcript.append(message);
   return message;
 }
@@ -75,8 +223,9 @@ function setStatus(message = "", error = false) {
 function updateControls() {
   input.readOnly = pending;
   send.disabled = pending || !input.value.trim();
-  reset.disabled = pending || (!transcript.childElementCount && !input.value);
-  empty.hidden = pending || turns.length > 0;
+  reset.disabled = pending || (!active.turns.length && !input.value);
+  empty.hidden = pending || active.turns.length > 0;
+  for (const button of sessionList.querySelectorAll(".session-item")) button.disabled = pending;
 }
 
 function scrollToLatest() {
@@ -93,12 +242,34 @@ function updateReplyLayout(update) {
   if (follow) scrollToLatest();
 }
 
+function renderTranscript() {
+  transcript.replaceChildren();
+  for (const turn of active.turns) {
+    appendMessage("user", turn.user);
+    appendMessage("assistant", turn.assistant, turn.evidence);
+  }
+  updateControls();
+  scrollToLatest();
+}
+
+function openSession(session) {
+  if (pending || session === active) return;
+  active = session;
+  rememberActive();
+  input.value = "";
+  setStatus();
+  renderTranscript();
+  renderSessions();
+  input.focus();
+}
+
 form.addEventListener("submit", async event => {
   event.preventDefault();
   const message = input.value.trim();
   if (pending || !message) return;
 
   pending = true;
+  const session = active;
   input.value = "";
   const userMessage = appendMessage("user", message);
   setStatus("Waiting for the agent…");
@@ -108,18 +279,24 @@ form.addEventListener("submit", async event => {
 
   let activity;
   try {
+    const history = session.turns.slice(-MAX_CONTEXT_TURNS).map(({ user, assistant }) => ({ user, assistant }));
     const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({ message, history: turns.slice(-MAX_CONTEXT_TURNS) }),
+      body: JSON.stringify({ message, history }),
     });
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       throw new Error(typeof data?.detail === "string" ? data.detail : "Unable to send the message. Please try again.");
     }
     let reply;
+    let evidence = [];
     await readEventStream(response, event => {
       if (event.type === "chat.error") throw new Error(event.detail);
+      if (event.type === "chat.evidence") {
+        evidence = Array.isArray(event.evidence) ? event.evidence : [];
+        return;
+      }
       if (event.type === "chat.completed") {
         reply = event.reply;
         return false;
@@ -139,9 +316,14 @@ form.addEventListener("submit", async event => {
     });
     if (typeof reply !== "string" || !reply.trim()) throw new Error("The reply was interrupted. Please try again.");
     const follow = isNearLatest();
-    turns.push({ user: message, assistant: reply });
-    saveTurns();
-    appendMessage("assistant", reply);
+    session.turns.push({ user: message, assistant: reply, evidence });
+    session.title ||= message.slice(0, 80);
+    session.updated_at = new Date().toISOString();
+    if (!sessions.includes(session)) sessions.unshift(session);
+    saveSessions();
+    rememberActive();
+    renderSessions();
+    appendMessage("assistant", reply, evidence, activity);
     setStatus();
     if (follow) scrollToLatest();
   } catch (error) {
@@ -169,12 +351,13 @@ input.addEventListener("keydown", event => {
 });
 
 reset.addEventListener("click", () => {
-  turns.length = 0;
-  saveTurns();
-  transcript.replaceChildren();
+  if (pending) return;
+  active = newSession();
+  rememberActive();
   input.value = "";
   setStatus();
-  updateControls();
+  renderTranscript();
+  renderSessions();
   input.focus();
 });
 
@@ -184,12 +367,8 @@ document.querySelector("#chat-example").addEventListener("click", event => {
   form.requestSubmit();
 });
 
-for (const turn of turns) {
-  appendMessage("user", turn.user);
-  appendMessage("assistant", turn.assistant);
-}
-updateControls();
-scrollToLatest();
+renderSessions();
+renderTranscript();
 
 fetch("/api/health", { cache: "no-store" })
   .then(response => response.json())

@@ -44,7 +44,7 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 
 状态为 `pending`、`in_progress`、`completed`、`blocked` 或 `skipped`。同一任务应沿用 ID，阻塞和跳过需要 `note`。应根据已经取得的证据确认任务是否完成。
 
-成功时返回带递增 `version` 的 `plan`。任务的 `evidence_ids` 由运行时从实际证据生成，保留同一任务 ID 的关联。每份有变化的快照发出 `plan.updated`。形状校验失败时返回 `invalid_arguments`，已接受的计划继续有效。此工具使用独立预算。 [事件格式](api-ui-trace.md#调查计划事件) · [输入模型](../dhub/planning.py)
+成功时返回带递增 `version` 的 `plan`。任务的 `evidence_ids` 由运行时从实际证据生成，保留同一任务 ID 的关联。每份有变化的快照发出 `plan.updated`。形状校验失败时返回 `invalid_arguments`，已接受的计划继续有效。此工具使用独立预算。 [事件格式](api-ui-trace.md#调查计划事件) · [输入模型](../dhub/agents/planning.py)
 
 ## 2. Domain Knowledge Investigator Tools
 
@@ -52,7 +52,7 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 
 ![Confluence 导出为 Markdown 和 manifest，加载为本次文档快照。目录、搜索和元数据工具用于定位，read_document 返回带页版本的原文证据。](diagrams/document-snapshot.svg)
 
-1. **导出。** 内网沿用现有 Confluence 导出。`ConfluencePage` 和 `module:pull_pages` 是可用的导出器接口。导出保留 FD1–FD5、Core Component Documentation 等获准页面的层级、标题、原文、表格和条件分支。 [导出器](../dhub/confluence.py) · [现有数据对接](intranet-poc-handoff.md)
+1. **导出。** 内网沿用现有 Confluence 导出。`ConfluencePage` 和 `module:pull_pages` 是可用的导出器接口。导出保留 FD1–FD5、Core Component Documentation 等获准页面的层级、标题、原文、表格和条件分支。 [导出器](../dhub/sources/confluence.py) · [现有数据对接](intranet-poc-handoff.md)
 2. **登记版本。** `manifest.json` 按 `page_id` 和 `version` 唯一定位页面，保留路径、标题、FD、父页面、源链接、更新时间、获准的更新者信息及其他元数据。链接和附件元数据可提供后续线索。附件正文需单独导出为可读内容才能引用。
 3. **加载快照。** `Knowledge` 每次运行从 manifest 加载内容与标题树，以 manifest 和可读原文计算 SHA-256 快照标识。加载时按章节预计算规范化正文和关键词。首标题之前的内容与无标题页面均进入搜索范围。
 
@@ -168,8 +168,8 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 
 - Decision Process 主要实现位于 `decision-engine-instant-decision-svc` 的 `dev` 分支。项目模式通过 `DHUB_REPOS_FILE` 配置仓库及 ref。`Repository.pin` 用 `git rev-parse` 和 `git ls-tree` 定位固定提交的 Git 对象，搜索和读取均使用该提交版本。
 - `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入项目侧适配器。内网适配器调用复用的 MDC Assistant CodeGraph 工具和查询、索引读取模块。`index_info(repo_id, deadline=...)` 返回 `CodeGraphIndex`。`explore(repo_id=..., index=..., query=..., deadline=...)` 返回 `CodeGraphResult`，携带同一索引绑定和文本或关系记录。传入的 `deadline` 是单调时钟绝对截止时间，复用层应据此给底层操作设定超时。
-- 查询前后验证仓库提交与本次运行的索引身份。索引更换时丢弃本次查询，之前已捕获的窗口仍可按原 ID 续读。旧的 `indexed_commit` 加关系列表接口仍可用，索引身份字段为空。 [接入代码](../dhub/codegraph.py)
-- Git 搜索和阅读通过 `CODE_EXTENSIONS` 筛选文件，包括 UTF-8 的 `.sh` 和 `.ps1` 脚本。 [仓库读取实现](../dhub/repositories.py)
+- 查询前后验证仓库提交与本次运行的索引身份。索引更换时丢弃本次查询，之前已捕获的窗口仍可按原 ID 续读。旧的 `indexed_commit` 加关系列表接口仍可用，索引身份字段为空。 [接入代码](../dhub/sources/codegraph.py)
+- Git 搜索和阅读通过 `CODE_EXTENSIONS` 筛选文件，包括 UTF-8 的 `.sh` 和 `.ps1` 脚本。 [仓库读取实现](../dhub/sources/repositories.py)
 - 演示的 `fixture-decision` 与 `fixture-channel` 来自合成文件，版本标识为内容哈希，调用关系取自 [codegraph.json](../demo/codegraph.json)。 [仓库接入说明](../README.md#接入项目仓库)
 
 ### 3.1 get_repository_metadata
@@ -180,7 +180,7 @@ Main Process Impact Analyser 通过上表的三个模型工具规划和派单。
 | --- | --- |
 | repo_id | 已配置仓库 ID |
 
-**Output** 包含仓库 ID、分支、提交、快照类型和仓库状态。CodeGraph 独立提供 `codegraph_status`、`codegraph_commit_sha`、可用的 `codegraph_index_id`、`codegraph_provider`、`codegraph_indexed_languages` 或 `codegraph_reason`。已知语言覆盖以索引信息为准。Git 支持读取某类文件时，仍需单独核实该语言的图索引覆盖。
+**Output** 包含仓库 ID、分支、提交、快照类型和仓库状态。CodeGraph 独立提供 `codegraph_status`、`codegraph_commit_sha`、可用的 `codegraph_index_id`、`codegraph_provider`、`codegraph_indexed_languages`，或不可用时的 `codegraph_reason` 与 `codegraph_error`。原因码见 [内网交接](intranet-poc-handoff.md#固定仓库并复用-codegraph)。已知语言覆盖以索引信息为准。Git 支持读取某类文件时，仍需单独核实该语言的图索引覆盖。
 
 **Example**（合成仓库）
 
@@ -345,15 +345,15 @@ Hybrid RAG 是 search_documents 的后端升级，不需要把关键词检索和
 
 | 组件 | 源码入口 | 定位内容 |
 | --- | --- | --- |
-| Confluence 数据导出 | [confluence.py](../dhub/confluence.py) | `ConfluencePage`、`write_export`、provider 接口 |
-| 单次运行的资料快照 | [sources.py](../dhub/sources.py) | `Sources` 绑定文档、仓库和 CodeGraph |
-| 文档与章节 | [documents.py](../dhub/documents.py) | `Knowledge` 加载、章节切分、快照标识 |
-| 固定 Git 版本搜索与读取 | [repositories.py](../dhub/repositories.py) | `Repository`、合成调用图 |
-| CodeGraph 接入契约 | [codegraph.py](../dhub/codegraph.py) | `BoundCodeGraphAdapter`、索引绑定与续读 |
+| Confluence 数据导出 | [confluence.py](../dhub/sources/confluence.py) | `ConfluencePage`、`write_export`、provider 接口 |
+| 单次运行的资料快照 | [manager.py](../dhub/sources/manager.py) | `Sources` 绑定文档、仓库、CodeGraph 和两套调查工具 |
+| 文档与章节 | [documents.py](../dhub/sources/documents.py) | `Knowledge` 加载、章节切分、快照标识 |
+| 固定 Git 版本搜索与读取 | [repositories.py](../dhub/sources/repositories.py) | `Repository`、文件发现、固定提交搜索和阅读 |
+| CodeGraph 接入契约 | [codegraph.py](../dhub/sources/codegraph.py) | `BoundCodeGraphAdapter`、索引绑定与续读、合成图适配器 |
 | Domain 四个工具 | [Domain 注册](../dhub/tools/domain.py) · [Domain Investigator](../dhub/agents/domain.py) | 绑定知识快照并暴露目录、搜索和原文工具 |
 | Code 六个工具 | [Code 注册](../dhub/tools/code.py) · [Code Investigator](../dhub/agents/code.py) | 绑定 Git/CodeGraph 快照并暴露调查工具 |
 | 单项工具与共用逻辑 | [工具文件列表](#1-tool-overview) · [tools/utils/](../dhub/tools/utils/) | 每个工具一个实现文件，复用路径、搜索、分页和派单函数 |
 | 工具注册和模型输入 | [registry.py](../dhub/tools/registry.py) | 从工具函数签名和文档字符串建立 `StructuredTool` |
-| Tool calling、证据、Trace、预算 | [agent_runtime.py](../dhub/agent_runtime.py) | `AgentRuntime.investigate`、`call_tool` |
+| Tool calling、证据、Trace、预算 | [runtime.py](../dhub/agents/runtime.py) | `AgentRuntime.investigate`、`call_tool` |
 
 十个资料工具已有本地实现或适配契约。内网用已有 Confluence 导出和 LLM 网关，复用 MDC Assistant 的 CodeGraph 实现后在真实仓库上验收。Hybrid RAG 保留为 V1 候选。 [交接与验收](intranet-poc-handoff.md)

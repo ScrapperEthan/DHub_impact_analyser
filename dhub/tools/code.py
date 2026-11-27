@@ -1,7 +1,8 @@
 """Bind the Git and CodeGraph tools to a run's repositories."""
 
-from ..codegraph import BoundCodeGraphAdapter, CodeGraphAdapter, CodeGraphSession
-from ..repositories import Repository
+from ..sources.codegraph import BoundCodeGraphAdapter, CodeGraphAdapter, CodeGraphSession
+from ..sources.repositories import Repository
+from ..sources.utils import SourceError
 from . import codegraph_explore as explore_tool
 from . import codegraph_read_result as graph_read_tool
 from . import get_repository_metadata as metadata_tool
@@ -10,7 +11,6 @@ from . import read_file as read_tool
 from . import search_code as search_tool
 from .read_file import MAX_CODE_READ_CHARS as MAX_CODE_READ_CHARS
 from .registry import ToolDefinition, build_toolset, define_tool
-from .utils.source import SourceError
 
 
 class CodeTools:

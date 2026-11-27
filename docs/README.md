@@ -10,6 +10,7 @@ DHub（DecisionHub）在开发前分析 Business 或 Developer 提出的变更�
 | [Expected Tools](expected-tools.md) | Main Agent 规划和派单、十个资料工具、数据快照、V0 搜索与 CodeGraph、V1 Hybrid RAG 候选设计 |
 | [Project README](../README.md) | 本地启动、模型配置、导入 Confluence、接入 Git 与 CodeGraph |
 | [内网 PoC 交接](intranet-poc-handoff.md) | 现有 Markdown/HTML 导出、站点 YAML、复用 CodeGraph、端到端验收 |
+| [DHub 源码导读](../dhub/README.md) | 核心模块职责、源码入口和依赖关系 |
 
 ## V0 PoC Specifications
 
@@ -33,7 +34,7 @@ V0 的验收范围以 [PoC Requirements](poc-requirements.md) 为准。V1 和 V2
 
 ### 知识库分期
 
-V0 从 `data/confluence/` 载入带清单的版本化 Markdown，验收原文导入、章节检索、精确读取和证据溯源。主题 Wiki 在 `data/knowledge/wiki/` 预留目录，按主题目录与 `topics/` 下的业务页组织。
+V0 从 `data/confluence/` 载入带清单的版本化 Markdown，验收原文导入、章节检索、精确读取和证据溯源。主题 Wiki 在 `data/knowledge/wiki/` 预留目录，按主题目录与 `topics/` 下的业务页组织。`data/` 不纳入 Git，需要时在内网创建该目录。
 
 后续可用 **OKF Generate Skill** 辅助 OpenCode 整理主题页，并依据实际查询场景评估专用检索。Wiki 是导航与归纳用的知识增强层，每条业务规则须能追溯到原始 Confluence 的页 ID、版本和章节。内容生成与专用检索可随真实案例验证逐步推进。 [目录设计](intranet-poc-handoff.md#主题-wiki-目录设计)
 
@@ -53,10 +54,10 @@ V1 验收应能在真实变更上找到正确的规则和实现，列清直接�
 | 顺序 | 入口 | 看什么 |
 | --- | --- | --- |
 | 1 | [analyzer.py](../dhub/analyzer.py) | 聊天、影响分析、快照和截止时间入口 |
-| 2 | [main.py](../dhub/agents/main.py) · [planning.py](../dhub/planning.py) · [domain.py](../dhub/agents/domain.py) · [code.py](../dhub/agents/code.py) | 主 Agent 的 LangGraph 循环、计划校验、调查交接和离线示例 |
-| 3 | [agent_runtime.py](../dhub/agent_runtime.py) · [prompts](../dhub/prompts/) | 原生工具调用、预算、Trace、角色提示词和六阶段基线 |
-| 4 | [sources.py](../dhub/sources.py) · [工具源码索引](expected-tools.md#7-source-code-mapping) | 如何绑定资料版本、查规则和代码、生成原文证据 |
-| 5 | [report.py](../dhub/report.py) · [app.py](../dhub/app.py) · [store/](../dhub/store/) · [static](../dhub/static/) | 报告校验、API、存储与页面回放 |
-| 6 | [llm/](../dhub/llm/) · [config/](../dhub/config/) · [demo](../demo/) · [test_poc.py](../tests/test_poc.py) | 模型适配和设置、合成资料、离线与模拟网关用例 |
+| 2 | [main.py](../dhub/agents/main.py) · [planning.py](../dhub/agents/planning.py) · [domain.py](../dhub/agents/domain.py) · [code.py](../dhub/agents/code.py) | 主 Agent 的 LangGraph 循环、计划校验、调查交接和离线示例 |
+| 3 | [runtime.py](../dhub/agents/runtime.py) · [prompts/](../dhub/prompts/README.md) | 原生工具调用、预算、Trace、角色提示词和六阶段基线 |
+| 4 | [sources/](../dhub/sources/README.md) · [tools/](../dhub/tools/README.md) | 如何绑定资料版本、查规则和代码、生成原文证据 |
+| 5 | [reports/](../dhub/reports/README.md) · [app.py](../dhub/app.py) · [store/](../dhub/store/README.md) · [static/](../dhub/static/README.md) | 报告校验、API、存储与页面回放 |
+| 6 | [llm/](../dhub/llm/README.md) · [config/](../dhub/config/README.md) · [demo](../demo/) · [tests/](../tests/README.md) | 模型适配和设置、合成资料、离线与模拟网关用例 |
 
 依照项目 README 启动或运行测试后，在本地网页填入示例。从 Trace 跟到代码补查，再从报告里的证据跳回实际工具调用。 [快速启动](../README.md#快速启动) · [本地烟测](../README.md#内网验证与排查)

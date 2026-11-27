@@ -1,7 +1,7 @@
-"""Pinned Git repositories and CodeGraph adapters."""
+"""File discovery, search and reads against pinned Git repositories."""
 
 import hashlib
-import json
+import logging
 import os
 import re
 import subprocess
@@ -12,17 +12,13 @@ from pathlib import Path, PurePosixPath
 from threading import Thread
 from time import monotonic
 
-from .codegraph import CodeGraphAdapter as CodeGraphAdapter
-from .codegraph import CodeGraphIndex, CodeGraphResult
-from .tools.utils.search import match_excerpt, query_tokens
-from .tools.utils.source import SourceError, path_in_source, read_source_text, relative_path
+from .utils import SourceError, describe_error, match_excerpt, path_in_source, read_source_text, relative_path
 
-DEMO_ROOT = Path(__file__).resolve().parent.parent / "demo"
+log = logging.getLogger(__name__)
 CODE_EXTENSIONS = frozenset({
     ".py", ".pyi", ".sh", ".ps1", ".json", ".yaml", ".yml", ".toml", ".ini", ".cfg", ".sql", ".md", ".txt",
 })
 MAX_CODE_BYTES = 512_000
-MAX_DEMO_GRAPH_BYTES = 8_000_000
 MAX_GREP_BYTES = 2_000_000
 GREP_PATH_ARGUMENT_BUDGET = 12_000
 
@@ -46,11 +42,23 @@ def _git(root: Path, *args: str, timeout: float = 20) -> bytes:
         result = subprocess.run(command, capture_output=True, timeout=timeout, env=env, check=False)
     except subprocess.TimeoutExpired:
         raise SourceError("source_timeout", "The read-only Git operation timed out.") from None
-    except OSError:
-        raise SourceError("repository_unavailable", "Git is not available for the repository.") from None
+    except OSError as error:
+        raise SourceError(
+            "repository_unavailable", f"Git is not available for the repository ({describe_error(error)}).",
+        ) from None
     if result.returncode == 0:
         return result.stdout
-    raise SourceError("git_read_failed", "The requested Git object or configured revision is unavailable.")
+    message = "The requested Git object or configured revision is unavailable."
+    if reason := _git_reason(result.stderr):
+        message += f" Git said: {reason}"
+    raise SourceError("git_read_failed", message)
+
+
+def _git_reason(stderr: bytes) -> str:
+    # Keep Git's own diagnosis, such as dubious ownership or an unknown revision.
+    lines = [line.strip() for line in stderr.decode("utf-8", "replace").splitlines() if line.strip()]
+    reason = next((line for line in lines if line.startswith(("fatal:", "error:"))), lines[0] if lines else "")
+    return describe_error(reason) if reason else ""
 
 
 def _bounded_grep(root: Path, args: tuple[str, ...], limit: int, deadline: float) -> tuple[bytes, bool]:
@@ -204,7 +212,11 @@ class Repository:
                     self.files[path] = (oid, int(length))
         except (OSError, ValueError, SourceError) as error:
             self.commit_sha = None
-            self.error = str(error) if isinstance(error, SourceError) else "The repository snapshot could not be read."
+            self.error = (
+                str(error) if isinstance(error, SourceError)
+                else f"The repository snapshot could not be read ({describe_error(error)})."
+            )
+            log.warning("Repository %s is unavailable: %s", self.repo_id, self.error)
 
     def metadata(self, indexed_commit: str | None) -> dict:
         return {
@@ -323,28 +335,3 @@ def _code_path(path: str) -> bool:
     except SourceError:
         return False
     return all(part.casefold() != ".git" for part in parts) and PurePosixPath(path).suffix.lower() in CODE_EXTENSIONS
-
-
-class DemoCodeGraph:
-    def __init__(self, repositories: dict[str, Repository]):
-        self.repositories = repositories
-        try:
-            raw = read_source_text(DEMO_ROOT / "codegraph.json", MAX_DEMO_GRAPH_BYTES)
-            self.edges = json.loads(raw)
-            self.index_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()
-        except (ValueError, OSError, SourceError):
-            self.edges = {}
-
-    def index_info(self, repo_id: str, *, deadline: float) -> CodeGraphIndex | None:
-        if repo_id not in self.edges:
-            return None
-        return CodeGraphIndex("demo", self.repositories[repo_id].commit_sha, self.index_id, ("python",))
-
-    def explore(self, *, repo_id: str, index: CodeGraphIndex, query: str, deadline: float) -> CodeGraphResult:
-        terms = query_tokens(query)
-        matches = []
-        for edge in self.edges.get(repo_id, []):
-            label = " ".join(str(edge.get(key, "")) for key in ("caller", "callee", "path")).casefold()
-            if any(term in label for term in terms):
-                matches.append(edge)
-        return CodeGraphResult(index, results=matches)

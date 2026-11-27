@@ -1,8 +1,8 @@
 """Find file names in a pinned commit."""
 
-from ..repositories import CODE_EXTENSIONS, parse_glob
+from ..sources.repositories import CODE_EXTENSIONS, parse_glob
+from ..sources.utils import relative_path
 from .utils.paging import bounded_size, catalogue_page
-from .utils.source import relative_path
 
 
 TRACE_FIELDS = ("repo_id", "path_prefix", "glob", "offset", "limit")

@@ -7,13 +7,8 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from langgraph.graph import END, START, StateGraph
 from pydantic import ValidationError
 
-from ..agent_runtime import (
-    MAX_DELEGATIONS, MAX_RUN_TOOLS, TIME_LIMIT, TOOL_LIMIT, AgentRuntime, State, as_json, json_object,
-    load_system_prompt,
-)
 from ..llm import LLMError
-from ..planning import OPEN_TASK_STATUSES
-from ..report import Report, ground_report
+from ..reports.impact import Report, ground_report
 from ..tools.investigate_code import create_investigate_code_tool
 from ..tools.investigate_domain import create_investigate_domain_tool
 from ..tools.registry import build_toolset
@@ -21,6 +16,11 @@ from ..tools.update_plan import create_update_plan_tool
 from ..tools.utils.delegation import run_investigation
 from .code import CodeInvestigator
 from .domain import DomainKnowledgeInvestigator
+from .planning import OPEN_TASK_STATUSES
+from .runtime import (
+    MAX_DELEGATIONS, MAX_RUN_TOOLS, TIME_LIMIT, TOOL_LIMIT, AgentRuntime, State, as_json, json_object,
+    load_system_prompt,
+)
 
 DEMO_REQUIREMENT = (
     "Mandatory outbound campaigns should no longer bypass the frequency cap, "
@@ -70,8 +70,17 @@ class MainProcessImpactAnalyser:
                 })}]
                 try:
                     report = self._run_online(requirement, messages, span, prompt, self._parse_report)
-                except (LLMError, ValidationError):
-                    self.runtime.note("The model did not produce a valid report. The available evidence and coverage are included.")
+                except (LLMError, ValidationError) as exc:
+                    if isinstance(exc, ValidationError):
+                        cause = f"The report did not match the schema ({exc.error_count()} errors)."
+                    else:
+                        cause = str(exc)
+                    if cause != TIME_LIMIT:
+                        # A gateway or report-format failure is a failed run, not a bounded gap.
+                        self.runtime.failure = f"The model did not produce a valid report. {cause}"
+                    self.runtime.note(
+                        f"The model did not produce a valid report. {cause} The available evidence and coverage are included."
+                    )
                     report = self.fallback(requirement)
             report.open_questions = list(dict.fromkeys([*report.open_questions, *self.runtime.limits]))
             return ground_report(report, self.runtime.evidence)
@@ -295,7 +304,8 @@ class MainProcessImpactAnalyser:
                 (paragraph for paragraph in content.split("\n\n") if "Inbound" in paragraph and "Outbound" in paragraph),
                 content,
             )
-        return f"{content}\n\nSee P5 Step 18 in the demo document DEMO-FD2 v1."
+        evidence = "".join(f" [{evidence_id}]" for evidence_id in result.get("evidence_ids", []))
+        return f"{content}\n\nSee P5 Step 18 in the demo document DEMO-FD2 v1{evidence}."
 
     def _offline_analysis(self, requirement: str, span: str) -> Report:
         normalized = " ".join(requirement.casefold().split()).rstrip(".")

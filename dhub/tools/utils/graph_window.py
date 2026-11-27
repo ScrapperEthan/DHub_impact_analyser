@@ -1,7 +1,7 @@
 """Validate captured CodeGraph result windows."""
 
-from ...codegraph import MAX_GRAPH_READ_CHARS
-from .source import SourceError
+from ...sources.codegraph import MAX_GRAPH_READ_CHARS
+from ...sources.utils import SourceError
 
 
 def validate_graph_window(offset: int, limit: int, max_chars: int) -> None:

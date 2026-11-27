@@ -7,12 +7,12 @@ from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
 
-from dhub.agent_runtime import AgentRuntime, run_deadline
-from dhub.codegraph import CodeGraphIndex, CodeGraphResult
+from dhub.agents.runtime import AgentRuntime, run_deadline
 from dhub.config import Settings
-from dhub.repositories import Repository
-from dhub.source_utils import SourceError
 from dhub.sources import Sources
+from dhub.sources.codegraph import CodeGraphIndex, CodeGraphResult, UnavailableCodeGraphAdapter, load_codegraph
+from dhub.sources.repositories import Repository
+from dhub.sources.utils import SourceError
 from dhub.tools.code import CodeTools, MAX_CODE_READ_CHARS
 
 SHA = "a" * 40
@@ -114,7 +114,7 @@ class GraphContractTest(unittest.TestCase):
             CodeGraphResult(INDEX, results=[{"caller": "too_late"}]),
             on_query=lambda deadline: clock.__setitem__(0, deadline + 1),
         )
-        with patch("dhub.codegraph.monotonic", side_effect=lambda: clock[0]):
+        with patch("dhub.sources.codegraph.monotonic", side_effect=lambda: clock[0]):
             tools = graph_tools(provider)
             definition = tools.toolset()["codegraph_explore"].tool
             for invalid in ({"limit": True}, {"root": "elsewhere"}):
@@ -156,6 +156,57 @@ class GraphContractTest(unittest.TestCase):
         trace = json.dumps(events)
         for private in ("private graph query", "private graph output", "physical index path", result_id[0]):
             self.assertNotIn(private, trace)
+
+
+class AdapterFailureTest(unittest.TestCase):
+    def metadata(self, provider):
+        snapshot, = graph_tools(provider).repository_snapshots()
+        return snapshot["codegraph_reason"], snapshot.get("codegraph_error", "")
+
+    def test_load_init_lookup_and_missing_index_have_distinct_reasons(self):
+        with self.assertRaises(SourceError) as missing_module:
+            load_codegraph("dhub_missing_codegraph_adapter:create")
+        self.assertEqual(missing_module.exception.code, "codegraph_adapter_load_failed")
+        self.assertIn("No module named 'dhub_missing_codegraph_adapter'", str(missing_module.exception))
+        with self.assertRaises(SourceError) as missing_factory:
+            load_codegraph("json:create_adapter")
+        self.assertEqual(missing_factory.exception.code, "codegraph_adapter_load_failed")
+        with self.assertRaises(SourceError) as failing_factory:
+            load_codegraph("json:loads")  # Calling the factory without arguments raises TypeError.
+        self.assertEqual(failing_factory.exception.code, "codegraph_adapter_init_failed")
+
+        self.assertEqual(self.metadata(UnavailableCodeGraphAdapter(failing_factory.exception))[0], "codegraph_adapter_init_failed")
+        self.assertEqual(self.metadata(None)[0], "codegraph_not_configured")
+        broken = Mock(index_info=Mock(side_effect=RuntimeError("index file missing token=abc")))
+        with self.assertLogs("dhub.sources.codegraph", "WARNING"):
+            reason, error = self.metadata(broken)
+        self.assertEqual(reason, "codegraph_index_unavailable")
+        self.assertIn("RuntimeError: index file missing token=[redacted]", error)
+        self.assertEqual(self.metadata(GraphProvider(None, index=None))[0], "codegraph_unavailable")
+
+    def test_tool_errors_reach_trace_and_main_with_a_recovery_hint(self):
+        sources = Sources()
+        settings = Settings()
+        events = []
+        runtime = AgentRuntime(settings, sources, sources.snapshot(), events.append, deadline=run_deadline(settings))
+        returned = []
+
+        def investigate(agent, span, messages, tools):
+            returned.append(runtime.call_tool(agent, span, tools, "read_file", {"repo_id": "fixture-decision", "path": "nope.py"}))
+            return '{"tool_errors": ["invented"]}'
+
+        with patch.object(runtime, "chat_with_tools", side_effect=investigate):
+            with runtime.agent_span("code", "Check source", "main") as span:
+                findings = runtime.investigate("code", span, "Check source", "Source review", sources.code.toolset(), {})
+        failure, = returned
+        self.assertEqual((failure["error"], failure["tool"], failure["status"]), ("file_not_found", "read_file", "failed"))
+        self.assertIn("list_files", failure["hint"])
+        self.assertEqual(findings["tool_errors"], [{
+            "tool": "read_file", "error": "file_not_found", "message": failure["message"], "status": "failed",
+            "input": {"repo_id": "fixture-decision", "path": "nope.py"},
+        }])
+        finished = next(event for event in events if event["type"] == "tool.finished")
+        self.assertEqual((finished["status"], finished["error_code"]), ("failed", "file_not_found"))
 
 
 class EvidenceWindowTest(unittest.TestCase):

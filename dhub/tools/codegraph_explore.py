@@ -4,9 +4,9 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..codegraph import DEFAULT_GRAPH_READ_CHARS, MAX_GRAPH_READ_CHARS
+from ..sources.codegraph import DEFAULT_GRAPH_READ_CHARS, MAX_GRAPH_READ_CHARS
+from ..sources.utils import SourceError
 from .utils.graph_window import validate_graph_window
-from .utils.source import SourceError
 
 
 TRACE_FIELDS = ("repo_id", "limit", "max_chars")

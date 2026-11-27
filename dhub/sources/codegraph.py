@@ -2,24 +2,29 @@
 
 from __future__ import annotations
 
+import hashlib
+import importlib
 import json
+import logging
 from copy import deepcopy
 from dataclasses import dataclass, replace
 from time import monotonic
 from typing import TYPE_CHECKING, Literal, Protocol
 from uuid import uuid4
 
-from .tools.utils.source import SourceError
+from .utils import DEMO_ROOT, SourceError, describe_error, query_tokens, read_source_text
 
 if TYPE_CHECKING:
     from .repositories import Repository
 
+log = logging.getLogger(__name__)
 
 MAX_GRAPH_RELATIONS = 100
 MAX_GRAPH_CAPTURE_CHARS = 24_000
 MAX_GRAPH_READ_CHARS = 12_000
 DEFAULT_GRAPH_READ_CHARS = 3_500
 GRAPH_TIMEOUT = 20
+MAX_DEMO_GRAPH_BYTES = 8_000_000
 
 
 class CodeGraphAdapter(Protocol):
@@ -58,11 +63,60 @@ class BoundCodeGraphAdapter(Protocol):
     ) -> CodeGraphResult: ...
 
 
-class UnavailableCodeGraphAdapter:
-    """Represent a configured adapter that failed to load."""
+def load_codegraph(spec: str):
+    """Import and create the configured adapter, keeping import and factory failures distinct."""
+    if not spec:
+        return None
+    module, separator, factory = spec.partition(":")
+    if not separator or not module or not factory:
+        raise SourceError("codegraph_adapter_invalid", "DHUB_CODEGRAPH_ADAPTER must use module:factory.")
+    try:
+        create = getattr(importlib.import_module(module), factory)
+    except Exception as error:
+        raise SourceError(
+            "codegraph_adapter_load_failed", f"Cannot import the CodeGraph adapter {spec} ({describe_error(error)}).",
+        ) from error
+    try:
+        return create()
+    except Exception as error:
+        raise SourceError(
+            "codegraph_adapter_init_failed", f"The CodeGraph adapter factory {spec} failed ({describe_error(error)}).",
+        ) from error
 
-    def indexed_commit(self, repo_id: str) -> str | None:
-        raise RuntimeError("The configured CodeGraph adapter could not be loaded.")
+
+class DemoCodeGraph:
+    def __init__(self, repositories: dict[str, Repository]):
+        self.repositories = repositories
+        try:
+            raw = read_source_text(DEMO_ROOT / "codegraph.json", MAX_DEMO_GRAPH_BYTES)
+            self.edges = json.loads(raw)
+            self.index_id = hashlib.sha256(raw.encode("utf-8")).hexdigest()
+        except (ValueError, OSError, SourceError):
+            self.edges = {}
+
+    def index_info(self, repo_id: str, *, deadline: float) -> CodeGraphIndex | None:
+        if repo_id not in self.edges:
+            return None
+        return CodeGraphIndex("demo", self.repositories[repo_id].commit_sha, self.index_id, ("python",))
+
+    def explore(self, *, repo_id: str, index: CodeGraphIndex, query: str, deadline: float) -> CodeGraphResult:
+        terms = query_tokens(query)
+        matches = []
+        for edge in self.edges.get(repo_id, []):
+            label = " ".join(str(edge.get(key, "")) for key in ("caller", "callee", "path")).casefold()
+            if any(term in label for term in terms):
+                matches.append(edge)
+        return CodeGraphResult(index, results=matches)
+
+
+class UnavailableCodeGraphAdapter:
+    """Represent a configured adapter that failed to load or initialize."""
+
+    def __init__(self, error: SourceError):
+        self.error = error
+
+    def index_info(self, repo_id: str, *, deadline: float) -> CodeGraphIndex | None:
+        raise self.error
 
 
 def _deadline(repo: Repository) -> float:
@@ -141,21 +195,30 @@ class CodeGraphSession:
 
     def _current_index(self, repo_id: str, deadline: float) -> CodeGraphIndex:
         _check_deadline(deadline)
+        if self.adapter is None:
+            raise SourceError(
+                "codegraph_not_configured", "No CodeGraph adapter is configured. Use Git search and source reads.",
+            )
         try:
-            if self.adapter is None:
-                index = None
-            elif self.bound:
+            if self.bound:
                 index = self.adapter.index_info(repo_id, deadline=deadline)
             else:
                 sha = self.adapter.indexed_commit(repo_id)
                 index = CodeGraphIndex("legacy", sha, None) if sha else None
+        except SourceError:
+            raise
         except TimeoutError:
             raise SourceError("codegraph_timeout", "CodeGraph index lookup timed out.") from None
-        except Exception:
-            raise SourceError("codegraph_index_unavailable", "CodeGraph could not read index information.") from None
+        except Exception as error:
+            log.warning("CodeGraph index lookup failed for %s", repo_id, exc_info=True)
+            raise SourceError(
+                "codegraph_index_unavailable", f"CodeGraph could not read index information ({describe_error(error)}).",
+            ) from None
         _check_deadline(deadline)
         if index is None:
-            raise SourceError("codegraph_unavailable", "No CodeGraph index is available. Use Git search and source reads.")
+            raise SourceError(
+                "codegraph_unavailable", "The adapter has no CodeGraph index for this repository. Use Git search and source reads.",
+            )
         if (
             not isinstance(index, CodeGraphIndex)
             or not isinstance(index.commit_sha, str) or not index.commit_sha
@@ -173,6 +236,7 @@ class CodeGraphSession:
                 "codegraph_commit_sha": None,
                 "codegraph_status": "unavailable",
                 "codegraph_reason": why.code if why else "repository_unavailable",
+                **({"codegraph_error": str(why)} if why else {}),
             }
         matches = index.commit_sha == repo.commit_sha
         return {
@@ -206,8 +270,11 @@ class CodeGraphSession:
                 result = CodeGraphResult(index, results=rows)
         except TimeoutError:
             raise SourceError("codegraph_timeout", "CodeGraph query timed out. Use Git search and source reads.") from None
-        except Exception:
-            raise SourceError("codegraph_failed", "CodeGraph could not complete the query. Use Git tools.") from None
+        except Exception as error:
+            log.warning("CodeGraph query failed for %s", repo.repo_id, exc_info=True)
+            raise SourceError(
+                "codegraph_failed", f"CodeGraph could not complete the query ({describe_error(error)}). Use Git tools.",
+            ) from None
         _check_deadline(deadline)
         self._verify_index(repo.repo_id, index, deadline)
         if not isinstance(result, CodeGraphResult):

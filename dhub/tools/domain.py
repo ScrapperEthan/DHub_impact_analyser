@@ -1,6 +1,6 @@
 """Bind the document tools to a run's knowledge snapshot."""
 
-from ..documents import Knowledge
+from ..sources.documents import Knowledge
 from . import get_document_metadata as metadata_tool
 from . import list_documents as list_tool
 from . import read_document as read_tool

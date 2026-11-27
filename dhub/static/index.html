@@ -38,6 +38,17 @@
       <p id="notice" class="notice" role="status" hidden></p>
     </form>
 
+    <details id="history" class="panel history-panel">
+      <summary>
+        <span class="section-title">Report History</span>
+        <span id="history-count" class="muted history-count"></span>
+      </summary>
+      <div class="history-body">
+        <p id="history-empty" class="muted empty-state" hidden>No analysis runs yet.</p>
+        <ul id="history-list" class="history-list" aria-label="Previous analysis runs"></ul>
+      </div>
+    </details>
+
     <div class="poc-results">
       <section class="panel report-panel" aria-labelledby="report-title">
         <div class="panel-header">

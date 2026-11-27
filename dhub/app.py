@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -76,14 +77,16 @@ def _execute_run(settings: Settings, store: RunStore, run_id: str, requirement: 
         if status == "failed" and detail == TIME_LIMIT:
             store.finish_run(run_id, status, None, TIME_LIMIT, "ANALYSIS_TIMEOUT")
         elif status == "failed":
-            store.finish_run(run_id, status, None, FAILED_MESSAGE, "ANALYSIS_FAILED")
-        elif status == "partial" and detail:
-            store.finish_run(run_id, status, report, "The analysis is partial. See the report and trace for details.", "ANALYSIS_INCOMPLETE")
+            # A failed run keeps the evidence gathered before the failure, when there is any.
+            store.finish_run(
+                run_id, status, report if isinstance(report, dict) else None,
+                f"{FAILED_MESSAGE} {detail}" if detail else FAILED_MESSAGE, "ANALYSIS_FAILED",
+            )
         else:
             store.finish_run(run_id, status, report, None)
     except Exception as exc:
-        LOGGER.error("Analysis failed for run %s (%s)", run_id, type(exc).__name__)
-        store.finish_run(run_id, "failed", None, FAILED_MESSAGE, "ANALYSIS_FAILED")
+        LOGGER.exception("Analysis failed for run %s (%s)", run_id, type(exc).__name__)
+        store.finish_run(run_id, "failed", None, f"{FAILED_MESSAGE} ({type(exc).__name__})", "ANALYSIS_FAILED")
 
 
 def _event_line(event: dict) -> str:
@@ -96,9 +99,23 @@ def _chat_failure(exc: Exception) -> tuple[int, str]:
     if isinstance(exc, LLMError):
         if str(exc) == TIME_LIMIT:
             return 504, TIME_LIMIT
+        LOGGER.warning("Chat failed: %s", exc)
         return 502, f"The agent could not reply. {exc}"
-    LOGGER.error("Chat failed (%s)", type(exc).__name__)
+    LOGGER.exception("Chat failed (%s)", type(exc).__name__)
     return 500, "Chat is temporarily unavailable. Please try again."
+
+
+def _configure_logging() -> None:
+    # uvicorn configures only its own loggers. Show DHub timing and failure logs on the server console.
+    logger = logging.getLogger("dhub")
+    if logger.handlers:
+        return
+    handler = logging.StreamHandler()
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+    logger.addHandler(handler)
+    level = os.environ.get("DHUB_LOG_LEVEL", "INFO").strip().upper()
+    logger.setLevel(level if level in logging.getLevelNamesMapping() else logging.INFO)
+    logger.propagate = False
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -109,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             from .config import Settings
 
             config = Settings.from_env()
+            _configure_logging()
         store = RunStore(config.db_path)
         store.recover_unfinished()
         executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dhub")
@@ -204,6 +222,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             state.store.finish_run(run_id, "failed", None, message, "SERVICE_STOPPING")
             raise HTTPException(status_code=503, detail=message) from None
         return {"run_id": run_id, "status": "queued"}
+
+    @application.get("/api/runs")
+    def list_runs(
+        request: Request, response: Response, limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ) -> dict:
+        response.headers["Cache-Control"] = "no-store"
+        return {"runs": request.app.state.store.list_runs(limit)}
 
     @application.get("/api/runs/{run_id}")
     def get_run(run_id: str, request: Request, response: Response) -> dict:

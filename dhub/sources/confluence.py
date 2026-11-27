@@ -1,4 +1,4 @@
-"""Export contract for a locally supplied Confluence MCP integration."""
+"""Export Confluence pages through a locally supplied MCP integration."""
 
 from __future__ import annotations
 

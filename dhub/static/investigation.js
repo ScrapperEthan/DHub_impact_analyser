@@ -79,6 +79,27 @@ async function readEventStream(response, onEvent) {
   }
 }
 
+function formatLocator(evidence) {
+  if (evidence.source_type === "code") {
+    const lines = evidence.start_line
+      ? " L" + evidence.start_line + (evidence.end_line > evidence.start_line ? "–" + evidence.end_line : "")
+      : "";
+    return [
+      evidence.repo_id,
+      (evidence.path || "") + lines,
+      evidence.commit_sha ? "Commit " + evidence.commit_sha : "",
+      evidence.symbol,
+    ].filter(Boolean).join(" · ");
+  }
+  return [
+    evidence.title || evidence.page_id,
+    evidence.section,
+    evidence.version ? "Version " + evidence.version : "",
+    evidence.feature_drop,
+    evidence.title && evidence.page_id ? "Page " + evidence.page_id : "",
+  ].filter(Boolean).join(" · ");
+}
+
 function evidenceLinks(parent, ids, openEvidence) {
   if (!ids?.length) return;
   const group = element("div", "evidence-links");
@@ -220,6 +241,7 @@ function createTraceView(list, count, placeholder) {
     const detail = element("span", "trace-line");
     if (agentName) detail.append(element("span", "trace-role", agentName));
     detail.append(element("span", "trace-name", name), tag(status));
+    if (current.error_code) detail.append(element("span", "trace-error", current.error_code));
     const timing = [
       formatTime(span.started?.at || current.at),
       formatDuration(current.elapsed_ms),

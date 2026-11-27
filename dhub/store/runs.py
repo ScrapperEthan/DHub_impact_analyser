@@ -147,6 +147,18 @@ class RunStore:
                 run[field] = json.loads(run[field])
         return run
 
+    def list_runs(self, limit: int = 50) -> list[dict]:
+        """List recent runs for the history panel, newest first, without reports or traces."""
+        with closing(self._connect()) as db:
+            rows = db.execute(
+                """
+                SELECT run_id, requirement, data_mode, status, created_at, finished_at FROM runs
+                ORDER BY created_at DESC, rowid DESC LIMIT ?
+                """,
+                (limit,),
+            ).fetchall()
+        return [{**dict(row), "requirement": row["requirement"][:300]} for row in rows]
+
     def get_events(self, run_id: str, after_seq: int, limit: int = 100) -> list[dict] | None:
         batch = self.get_event_batch(run_id, after_seq, limit)
         return batch[1] if batch is not None else None

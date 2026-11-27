@@ -1,6 +1,6 @@
 """Domain agent for business rules, process steps and Confluence evidence."""
 
-from ..agent_runtime import AgentRuntime, State, load_system_prompt
+from .runtime import AgentRuntime, State, load_system_prompt
 
 class DomainKnowledgeInvestigator:
     agent_id = "domain"

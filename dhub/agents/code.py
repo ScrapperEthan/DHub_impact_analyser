@@ -1,6 +1,6 @@
 """Code agent for pinned repositories, dependencies, configuration and tests."""
 
-from ..agent_runtime import AgentRuntime, State, load_system_prompt
+from .runtime import AgentRuntime, State, load_system_prompt
 
 class CodeInvestigator:
     agent_id = "code"

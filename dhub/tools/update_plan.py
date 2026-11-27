@@ -5,11 +5,11 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..planning import InvestigationPlan, PlanTask
+from ..agents.planning import InvestigationPlan, PlanTask
 from .registry import ToolDefinition, define_tool
 
 if TYPE_CHECKING:
-    from ..agent_runtime import State
+    from ..agents.runtime import State
 
 
 def create_update_plan_tool(

@@ -2,15 +2,16 @@
 
 import hashlib
 import json
+import logging
 import re
 from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 from itertools import accumulate
 from pathlib import Path
 
-from .tools.utils.search import query_tokens
-from .tools.utils.source import SourceError, path_in_source, read_source_text
+from .utils import SourceError, path_in_source, query_tokens, read_source_text
 
+log = logging.getLogger(__name__)
 HEADING = re.compile(r"^ {0,3}(#{1,6})[ \t]+(\S.*)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 MAX_MARKDOWN_BYTES = 8_000_000
@@ -121,12 +122,41 @@ class Document:
         return bisect_right(self.line_offsets, start), bisect_left(self.line_offsets, end)
 
 
+def _manifest_problem(error: Exception) -> str:
+    if isinstance(error, SourceError):
+        return str(error)
+    if isinstance(error, FileNotFoundError):
+        return "The manifest file was not found."
+    if isinstance(error, OSError):
+        return f"The manifest is not a readable file ({type(error).__name__}). Point to the manifest JSON file."
+    if isinstance(error, UnicodeError):
+        return "The manifest is not UTF-8 text."
+    if isinstance(error, json.JSONDecodeError):
+        return f"The manifest is not valid JSON (line {error.lineno}, column {error.colno})."
+    return "The manifest needs a documents array."
+
+
+def _page_problem(error: Exception, path) -> str:
+    location = str(path)[:200]
+    if isinstance(error, SourceError):
+        return f"{error} Path: {location}"
+    if isinstance(error, FileNotFoundError):
+        return f"Markdown file not found: {location}"
+    if isinstance(error, OSError):
+        return f"Markdown file could not be read ({type(error).__name__}): {location}"
+    if isinstance(error, UnicodeError):
+        return f"Markdown file is not UTF-8 text: {location}"
+    if isinstance(error, KeyError):
+        return "The manifest row needs a Markdown path."
+    return str(error) or type(error).__name__
+
+
 class Knowledge:
     def __init__(self, manifest: Path | None):
         self.documents: dict[tuple[str, str], Document] = {}
         self.snapshot_id: str | None = None
         self.error: str | None = None
-        self.skipped_pages: list[str] = []
+        self.skipped_pages: list[dict] = []
         if manifest is None:
             self.error = "Configure a local Markdown export manifest."
             return
@@ -136,24 +166,27 @@ class Knowledge:
             rows = data["documents"]
             if not isinstance(rows, list):
                 raise ValueError("documents must be an array")
-        except (OSError, ValueError, TypeError, KeyError, SourceError):
-            self.error = "The Markdown export manifest is missing or invalid."
+        except (OSError, ValueError, TypeError, KeyError, SourceError) as error:
+            self.error = f"The Markdown export manifest is missing or invalid. {_manifest_problem(error)}"
+            log.warning("%s Manifest: %s", self.error, manifest)
             return
 
         digest = hashlib.sha256(raw.encode("utf-8"))
-        for row in rows:
+        for row_number, row in enumerate(rows, 1):
             if not isinstance(row, dict):
-                self.skipped_pages.append("(invalid row)")
+                self.skipped_pages.append({"row": row_number, "reason": "The manifest row is not an object."})
                 continue
             key = _page_key(row.get("page_id") or "", row.get("version") or "")
             try:
-                if not all(key) or key in self.documents:
-                    raise ValueError("page identity")
+                if not all(key):
+                    raise ValueError("The manifest row needs page_id and version.")
+                if key in self.documents:
+                    raise ValueError("The page_id and version already appear in an earlier row.")
                 source = path_in_source(manifest.parent, row["path"])
                 content = read_source_text(source, MAX_MARKDOWN_BYTES)
                 ancestors = row.get("ancestors") or []
                 if not isinstance(ancestors, list) or not all(isinstance(item, str) for item in ancestors):
-                    raise ValueError("ancestors")
+                    raise ValueError("ancestors must be a list of strings.")
                 feature_drop = row.get("feature_drop") or ""
                 if not feature_drop:
                     match = re.search(r"\bFD[1-5]\b", " ".join(ancestors), re.IGNORECASE)
@@ -170,8 +203,16 @@ class Knowledge:
                 }
                 self.documents[key] = Document(metadata, content)
                 digest.update(content.encode("utf-8"))
-            except (OSError, ValueError, TypeError, KeyError, SourceError):
-                self.skipped_pages.append(key[0] or "(missing page ID)")
+            except (OSError, ValueError, TypeError, KeyError, SourceError) as error:
+                self.skipped_pages.append({
+                    "row": row_number, "page_id": key[0] or None, "version": key[1] or None,
+                    "reason": _page_problem(error, row.get("path")),
+                })
+        if self.skipped_pages:
+            log.warning(
+                "Skipped %d manifest rows. First reasons: %s", len(self.skipped_pages),
+                "; ".join(f"row {page['row']}: {page['reason']}" for page in self.skipped_pages[:3]),
+            )
         if self.documents:
             self.snapshot_id = digest.hexdigest()
         else:
@@ -193,6 +234,7 @@ class Knowledge:
             "status": "unavailable" if self.error else ("partial" if self.skipped_pages else "available"),
             "document_count": len(self.documents),
             "feature_drops": sorted({doc.metadata["feature_drop"] for doc in self.documents.values()} - {""}),
+            "skipped_count": len(self.skipped_pages),
             "skipped_pages": self.skipped_pages[:50],
             **({"error": self.error} if self.error else {}),
         }

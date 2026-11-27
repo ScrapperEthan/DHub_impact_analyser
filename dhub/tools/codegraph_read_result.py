@@ -2,7 +2,7 @@
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..codegraph import DEFAULT_GRAPH_READ_CHARS, MAX_GRAPH_READ_CHARS
+from ..sources.codegraph import DEFAULT_GRAPH_READ_CHARS, MAX_GRAPH_READ_CHARS
 from .utils.graph_window import validate_graph_window
 
 

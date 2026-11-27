@@ -1,6 +1,6 @@
 """Document scope matching and snapshot coverage."""
 
-from ...documents import Knowledge
+from ...sources.documents import Knowledge
 
 
 def matches_scope(metadata: dict, feature_drop: str | None, ancestor: str | None) -> bool:

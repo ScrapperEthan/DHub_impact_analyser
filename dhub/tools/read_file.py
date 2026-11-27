@@ -2,8 +2,8 @@
 
 from pydantic import StrictInt
 
-from ..repositories import code_lines
-from .utils.source import SourceError, relative_path
+from ..sources.repositories import code_lines
+from ..sources.utils import SourceError, relative_path
 
 
 TRACE_FIELDS = ("repo_id", "path", "start_line", "end_line", "column_offset", "max_chars")

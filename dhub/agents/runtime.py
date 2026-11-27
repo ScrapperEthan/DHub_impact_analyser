@@ -12,20 +12,22 @@ from hashlib import sha256
 from pathlib import Path
 from threading import Thread
 from time import monotonic
-from typing import TypedDict, TypeVar
+from typing import TYPE_CHECKING, TypedDict, TypeVar
 from uuid import uuid4
 
 from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import ValidationError
 
-from .config import MAX_RUN_TIMEOUT, Settings
-from .llm import LLMError, create_client
-from .sources import Sources
-from .tools.registry import ToolDefinition
-from .tools.utils.source import SourceError
+from ..config import MAX_RUN_TIMEOUT, Settings
+from ..llm import LLMError, create_client
+from ..sources.utils import SourceError
+from ..tools.registry import ToolDefinition
+
+if TYPE_CHECKING:
+    from ..sources.manager import Sources
 
 log = logging.getLogger(__name__)
-PROMPT_DIR = Path(__file__).with_name("prompts")
+PROMPT_DIR = Path(__file__).parent.parent / "prompts"
 MAX_RUN_TOOLS = 50
 MAX_INVESTIGATOR_TOOLS = 8
 MAX_DELEGATIONS = 50
@@ -34,7 +36,41 @@ GRAPH_TOOLS = {"codegraph_explore", "codegraph_read_result"}
 MAX_SEARCH_HISTORY = 8
 TIME_LIMIT = "The run reached its time limit."
 TOOL_LIMIT = f"The run reached the limit of {MAX_RUN_TOOLS} source tool calls."
+BUDGET_MESSAGE = "No call budget or time remains for this request. Finish from existing evidence and state the gap."
+DEFAULT_HINT = "Adjust the arguments or use another source tool, or record the gap."
+RECOVERY_HINTS = {
+    "invalid_arguments": "Correct the arguments against the tool schema and retry once.",
+    "invalid_path": "Use a repository-relative path from search_code or list_files.",
+    "file_not_found": "Find the path with list_files or search_code before reading.",
+    "document_not_found": "Use page_id and version from list_documents or search_documents.",
+    "section_not_found": "Search the page for a section_id or read the whole page.",
+    "ambiguous_section": "Search the page and read by section_id.",
+    "source_too_large": "Read a narrower line range or search for the relevant lines.",
+    "unsupported_encoding": "The source is not UTF-8 text. Use another source and record the gap.",
+    "timeout": "Narrow the query or path scope before retrying.",
+    "source_timeout": "Narrow the query or path scope before retrying.",
+    "repository_unavailable": "This repository cannot be read in this run. Use other sources and record the gap.",
+    "repository_not_found": "Use a repo_id from the snapshot.",
+    "git_read_failed": "Check the path and revision from the snapshot, then use other sources if it persists.",
+    "knowledge_unavailable": "The Confluence snapshot is unavailable. Record the gap.",
+    "graph_result_not_found": "Use a result_id returned by codegraph_explore in this run.",
+}
 T = TypeVar("T")
+
+
+def token_usage(usage: dict) -> dict[str, int]:
+    """Normalise Chat Completions and Responses usage fields when the gateway reports them."""
+    fields = {
+        "input": ("prompt_tokens", "input_tokens"),
+        "output": ("completion_tokens", "output_tokens"),
+        "total": ("total_tokens",),
+    }
+    counts = {}
+    for name, keys in fields.items():
+        value = next((usage[key] for key in keys if isinstance(usage.get(key), int)), None)
+        if value is not None:
+            counts[name] = value
+    return counts
 
 
 class RunDeadlineExceeded(TimeoutError):
@@ -105,7 +141,7 @@ class State(TypedDict, total=False):
 
 class AgentRuntime:
     def __init__(
-        self, settings: Settings, sources: Sources, snapshot: dict, emit: Callable[[dict], None], *, deadline: float,
+        self, settings: Settings, sources: "Sources", snapshot: dict, emit: Callable[[dict], None], *, deadline: float,
     ):
         self.sources = sources
         self.snapshot = snapshot
@@ -116,12 +152,25 @@ class AgentRuntime:
         self.deadline = deadline
         self.evidence: dict[str, dict] = {}
         self.limits: list[str] = []
+        # Set when the model could not deliver the run's final output, as opposed to a bounded gap.
+        self.failure: str | None = None
         self._limitation_count = 0
         self._search_history: dict[str, deque[dict]] = defaultdict(lambda: deque(maxlen=MAX_SEARCH_HISTORY))
         self._retrieval_coverage: dict[str, list[dict]] = defaultdict(list)
+        self._tool_errors: dict[str, list[dict]] = defaultdict(list)
         self.tool_count = 0
         self.span_count = 0
         self._span_tasks: dict[str, str] = {}
+        self.llm_calls = 0
+        self.llm_seconds = 0.0
+        self.token_usage: dict[str, int] = {}
+
+    def usage_summary(self) -> str:
+        tokens = ", ".join(f"{key}={value}" for key, value in self.token_usage.items()) or "not reported"
+        return (
+            f"LLM calls={self.llm_calls} ({self.llm_seconds:.2f} s), source tools={self.tool_count}, "
+            f"evidence={len(self.evidence)}, tokens {tokens}"
+        )
 
     def has_tool_budget(self) -> bool:
         return self.tool_count < MAX_RUN_TOOLS and self.remaining() > 0
@@ -201,6 +250,7 @@ class AgentRuntime:
         finally:
             self._span_tasks.pop(span, None)
             self._retrieval_coverage.pop(span, None)
+            self._tool_errors.pop(span, None)
             if status == "succeeded" and self._limitation_count > previous_limits:
                 status = "partial"
             self.emit({**meta, "type": "agent.finished", "status": status, "elapsed_ms": int((monotonic() - start) * 1000)})
@@ -221,17 +271,20 @@ class AgentRuntime:
     ) -> dict:
         if not self.has_tool_budget():
             self.note(TIME_LIMIT if self.remaining() <= 0 else TOOL_LIMIT)
-            return {"error": "budget_exhausted"}
+            return {"error": "budget_exhausted", "message": BUDGET_MESSAGE}
         definition = tools.get(name)
         if definition is None:
             self.note("The model requested a tool outside this investigator's toolset.")
-            return {"error": "unknown_tool"}
+            return {"error": "unknown_tool", "message": "Use one of the tools offered in this request.", "available_tools": sorted(tools)}
         if delegation:
             try:
                 return definition.tool.invoke(arguments)
             except (TypeError, ValueError, ValidationError):
                 self.note("The investigation assignment had invalid arguments.")
-                return {"error": "invalid_arguments"}
+                return {
+                    "error": "invalid_arguments",
+                    "message": "Send a non-empty question and, when a plan exists, a task_id from that plan.",
+                }
         self.tool_count += 1
         if self.tool_count == MAX_RUN_TOOLS:
             self.note(TOOL_LIMIT)
@@ -310,8 +363,8 @@ class AgentRuntime:
         except (TypeError, ValueError):
             error_code, error_summary, status = "invalid_arguments", "The tool received invalid arguments.", "failed"
         except Exception as exc:
-            log.warning("Tool %s failed (%s)", name, type(exc).__name__)
-            error_code, error_summary, status = "tool_failed", "The tool call failed.", "failed"
+            log.warning("Tool %s failed (%s)", name, type(exc).__name__, exc_info=True)
+            error_code, error_summary, status = "tool_failed", f"The tool call failed ({type(exc).__name__}).", "failed"
         finally:
             if name in SEARCH_TOOLS:
                 scope = output.get("effective_scope", meta["input_summary"])
@@ -340,28 +393,52 @@ class AgentRuntime:
                 **({"error_code": error_code, "error_summary": error_summary} if error_code else {}),
             })
         self.note(f"{name} · {error_summary}")
-        return {"error": error_code, "message": error_summary}
+        failure = {
+            "error": error_code, "message": error_summary, "tool": name, "status": status,
+            "input": meta["input_summary"], "hint": RECOVERY_HINTS.get(error_code, DEFAULT_HINT),
+        }
+        self._tool_errors[parent].append({key: failure[key] for key in ("tool", "error", "message", "status", "input")})
+        return failure
 
-    def chat(self, messages: list[dict], tools: list[dict] | None = None) -> dict:
+    def chat(self, messages: list[dict], tools: list[dict] | None = None, *, agent: str = "main") -> dict:
+        self.llm_calls += 1
+        call = self.llm_calls
+        start = monotonic()
         try:
             result = run_before_deadline(self.deadline, self.client.chat, messages, tools, timeout=self.remaining())
         except RunDeadlineExceeded:
+            self.llm_seconds += monotonic() - start
+            log.warning("LLM call %d (%s) stopped at the run time limit after %.2f s", call, agent, monotonic() - start)
             self.note(TIME_LIMIT)
             raise LLMError(TIME_LIMIT) from None
+        except LLMError as exc:
+            self.llm_seconds += monotonic() - start
+            log.warning("LLM call %d (%s) failed after %.2f s: %s", call, agent, monotonic() - start, exc)
+            raise
+        elapsed = monotonic() - start
+        self.llm_seconds += elapsed
+        usage = token_usage(result.usage)
+        for key, value in usage.items():
+            self.token_usage[key] = self.token_usage.get(key, 0) + value
+        log.info(
+            "LLM call %d (%s) %.2f s, %d messages, %d tools, %d tool calls, tokens %s", call, agent, elapsed,
+            len(messages), len(tools or []), len(result.message.get("tool_calls") or []),
+            ", ".join(f"{key}={value}" for key, value in usage.items()) or "not reported",
+        )
         return result.message
 
     def tool_message(
         self, call: dict, invoke: Callable[[str, dict], dict] | None = None, *, note_invalid: bool = True,
     ) -> dict:
         if invoke is None:
-            result = {"error": "budget_exhausted"}
+            result = {"error": "budget_exhausted", "message": BUDGET_MESSAGE}
         else:
             try:
                 arguments = json_object(call["function"]["arguments"])
             except LLMError:
                 if note_invalid:
                     self.note("The model returned tool arguments that could not be parsed.")
-                result = {"error": "invalid_arguments"}
+                result = {"error": "invalid_arguments", "message": "Send the tool arguments as one JSON object."}
             else:
                 result = invoke(call["function"]["name"], arguments)
         return {"role": "tool", "tool_call_id": call["id"], "content": as_json(result)}
@@ -381,7 +458,7 @@ class AgentRuntime:
 
         for _ in range(MAX_INVESTIGATOR_TOOLS + 1):
             active_tools = tool_schema if count < MAX_INVESTIGATOR_TOOLS and self.has_tool_budget() else None
-            message = self.chat(messages, active_tools)
+            message = self.chat(messages, active_tools, agent=agent)
             calls = message.get("tool_calls", [])
             if not calls:
                 return message.get("content")
@@ -416,6 +493,10 @@ class AgentRuntime:
             self.note(f"{stage} · {exc}")
             findings = {"open_questions": [f"Investigation incomplete. See the trace for {stage.lower()}."]}
         findings.pop("retrieval_coverage", None)
+        findings.pop("tool_errors", None)
         if coverage := self._retrieval_coverage.pop(span, []):
             findings["retrieval_coverage"] = coverage
+        if errors := self._tool_errors.pop(span, []):
+            # Main sees which source reads failed and why, so it can retry, redirect or record the gap.
+            findings["tool_errors"] = errors
         return findings

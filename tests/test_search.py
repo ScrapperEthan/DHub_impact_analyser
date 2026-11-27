@@ -8,12 +8,12 @@ from tempfile import TemporaryDirectory
 from time import monotonic
 from unittest.mock import patch
 
-from dhub.agent_runtime import AgentRuntime, run_deadline
 from dhub.agents.domain import DomainKnowledgeInvestigator
+from dhub.agents.runtime import AgentRuntime, run_deadline
 from dhub.config import Settings
-from dhub.documents import Knowledge
-from dhub.source_utils import SourceError
-from dhub.sources import Sources
+from dhub.sources.documents import Knowledge
+from dhub.sources.manager import Sources
+from dhub.sources.utils import SourceError
 from dhub.tools.code import MAX_CODE_READ_CHARS
 from dhub.tools.domain import DomainTools
 
@@ -107,6 +107,35 @@ class DocumentSearchTest(unittest.TestCase):
         unavailable = DomainTools(Knowledge(None)).search_documents("cap")
         self.assertEqual((unavailable["status"], unavailable["has_more"]), ("unavailable", None))
 
+    def test_skipped_pages_and_manifest_errors_explain_the_cause(self):
+        good = self.page("good", "# Good\nRules.")
+        (self.root / "latin1.md").write_bytes("caf\xe9".encode("latin-1"))
+        with self.assertLogs("dhub.sources.documents", "WARNING"):
+            knowledge = self.tools(
+                good, good, "not an object", {**good, "page_id": "gone", "path": "gone.md"},
+                {**good, "page_id": "outside", "path": "../outside.md"}, {**good, "page_id": "", "version": ""},
+                {**good, "page_id": "bad-ancestors", "ancestors": "FD2"}, {**good, "page_id": "latin1", "path": "latin1.md"},
+            ).knowledge
+        snapshot = knowledge.snapshot()
+        self.assertEqual((snapshot["status"], snapshot["document_count"], snapshot["skipped_count"]), ("partial", 1, 7))
+        reasons = {page["row"]: page["reason"] for page in snapshot["skipped_pages"]}
+        self.assertIn("earlier row", reasons[2])
+        self.assertIn("not an object", reasons[3])
+        self.assertEqual(reasons[4], "Markdown file not found: gone.md")
+        self.assertIn("relative path", reasons[5])
+        self.assertIn("page_id and version", reasons[6])
+        self.assertIn("ancestors", reasons[7])
+        self.assertIn("not UTF-8", reasons[8])
+
+        manifest = self.root / "manifest.json"
+        manifest.write_text("{not json", encoding="utf-8")
+        with self.assertLogs("dhub.sources.documents", "WARNING"):
+            self.assertIn("not valid JSON (line 1, column 2)", Knowledge(manifest).error)
+        with self.assertLogs("dhub.sources.documents", "WARNING"):
+            self.assertIn("not a readable file", Knowledge(self.root).error)
+        with self.assertLogs("dhub.sources.documents", "WARNING"):
+            self.assertIn("was not found", Knowledge(self.root / "absent.json").error)
+
 
 @unittest.skipUnless(which("git"), "Git is required for the project search tests.")
 class RepositorySearchTest(unittest.TestCase):
@@ -140,11 +169,26 @@ class RepositorySearchTest(unittest.TestCase):
             path.write_bytes(content.encode("utf-8"))
         git("add", "--", *files)
         git("commit", "-qm", "search fixture")
+        cls.repo_path = repo
         cls.sources = Sources(data_mode="project", repositories=[{"repo_id": "local", "path": str(repo)}])
+
+    def test_git_failures_keep_the_reason_from_git(self):
+        with TemporaryDirectory() as plain, self.assertLogs("dhub.sources.repositories", "WARNING"):
+            sources = Sources(data_mode="project", repositories=[
+                {"repo_id": "bad-ref", "path": str(self.repo_path), "ref": "no-such-branch"},
+                {"repo_id": "not-git", "path": plain},
+            ])
+        for snapshot in sources.snapshot()["repositories"]:
+            self.assertEqual(snapshot["status"], "unavailable")
+            self.assertIn("Git said: fatal:", snapshot["error"])
+        with patch("dhub.sources.repositories.subprocess.run", side_effect=FileNotFoundError("git")):
+            with self.assertRaises(SourceError) as missing:
+                self.sources.repositories["local"]._git("rev-parse", "HEAD")
+        self.assertIn("(FileNotFoundError: git)", str(missing.exception))
 
     def test_git_scopes_content_and_lists_matching_file_names(self):
         scope = {"path_prefix": "app", "glob": "**/tests/*.py"}
-        with patch("dhub.repositories.MAX_GREP_BYTES", 500):
+        with patch("dhub.sources.repositories.MAX_GREP_BYTES", 500):
             result = self.sources.search_code("allow mandate campaign override", mode="identifier", limit=1, **scope)
         self.assertEqual((result["status"], result["returned"], result["has_more"], result["truncated"]),
                          ("complete", 1, True, True))
@@ -186,7 +230,7 @@ class RepositorySearchTest(unittest.TestCase):
         self.assertEqual(near["commit_sha"], hit["commit_sha"])
 
     def test_incomplete_repo_search_reports_unknown_has_more(self):
-        with patch("dhub.repositories.MAX_GREP_BYTES", 100):
+        with patch("dhub.sources.repositories.MAX_GREP_BYTES", 100):
             capped = self.sources.search_code("allow_mandate_campaign_override", path_prefix="a")
         self.assertEqual((capped["status"], capped["returned"], capped["has_more"]), ("partial", 0, None))
         self.assertIn("output byte limit", capped["warnings"][0])
@@ -214,7 +258,7 @@ class SearchRuntimeTest(unittest.TestCase):
                 "id": name, "function": {"name": name, "arguments": json.dumps(arguments)},
             }]}
 
-        def model(messages, tools):
+        def model(messages, tools, **_labels):
             user_data = json.loads(messages[1]["content"])
             if user_data.get("search_history"):
                 history, = user_data["search_history"]

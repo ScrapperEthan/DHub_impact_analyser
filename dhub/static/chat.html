@@ -23,10 +23,20 @@
   </header>
 
   <main class="shell chat-workspace">
+    <aside class="panel chat-sessions" aria-labelledby="sessions-title">
+      <div class="panel-header chat-sessions-header">
+        <h2 id="sessions-title">Sessions</h2>
+        <button class="button subtle" id="new-chat" type="button">New Chat</button>
+      </div>
+      <div class="chat-sessions-body">
+        <p id="session-empty" class="muted empty-state" hidden>Saved chats appear here after the first reply.</p>
+        <ul id="session-list" class="session-list" aria-label="Saved chat sessions"></ul>
+      </div>
+    </aside>
+
     <section class="panel chat-panel" aria-labelledby="chat-title">
       <div class="panel-header chat-header">
         <h2 id="chat-title">Agent Chat</h2>
-        <button class="button subtle" id="new-chat" type="button" disabled>New Chat</button>
         <p id="chat-mode" class="muted chat-mode" hidden>Offline demo. Connect a model gateway to ask questions beyond the example.</p>
       </div>
 
