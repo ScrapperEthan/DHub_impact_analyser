@@ -1,42 +1,15 @@
+"""SQLite analysis-run persistence and replay."""
+
 import json
 import sqlite3
 from contextlib import closing, contextmanager
-from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
 
+from .events import RUN_SPAN, close_open_spans, elapsed_ms, encode_json, utc_now, write_event
+
 
 TERMINAL_STATUSES = {"succeeded", "partial", "failed"}
-TRACE_FIELDS = {
-    "type",
-    "span_id",
-    "parent_span_id",
-    "agent_id",
-    "status",
-    "elapsed_ms",
-    "stage",
-    "tool_name",
-    "input_summary",
-    "output_summary",
-    "error_code",
-    "error_summary",
-}
-RUN_SPAN = {"span_id": "run", "parent_span_id": None, "agent_id": None}
-
-
-def _now() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
-
-
-def _duration(started_at: str | None, ended_at: str) -> int:
-    if started_at is None:
-        return 0
-    elapsed = datetime.fromisoformat(ended_at) - datetime.fromisoformat(started_at)
-    return max(0, round(elapsed.total_seconds() * 1000))
-
-
-def _json(value: object) -> str:
-    return json.dumps(value, ensure_ascii=False, allow_nan=False)
 
 
 class RunStore:
@@ -88,12 +61,12 @@ class RunStore:
                 INSERT INTO runs (run_id, requirement, data_mode, status, created_at)
                 VALUES (?, ?, ?, 'queued', ?)
                 """,
-                (run_id, requirement, data_mode, _now()),
+                (run_id, requirement, data_mode, utc_now()),
             )
         return run_id
 
     def start_run(self, run_id: str) -> bool:
-        at = _now()
+        at = utc_now()
         with self._transaction() as db:
             result = db.execute(
                 "UPDATE runs SET status = 'running', started_at = ? WHERE run_id = ? AND status = 'queued'",
@@ -101,14 +74,14 @@ class RunStore:
             )
             if result.rowcount == 0:
                 return False
-            self._write_event(db, run_id, {**RUN_SPAN, "type": "run.started", "status": "running"}, at)
+            write_event(db, run_id, {**RUN_SPAN, "type": "run.started", "status": "running"}, at)
         return True
 
     def set_snapshot(self, run_id: str, snapshot: dict) -> None:
         with self._transaction() as db:
             db.execute(
                 "UPDATE runs SET source_snapshot = ? WHERE run_id = ? AND status = 'running'",
-                (_json(snapshot), run_id),
+                (encode_json(snapshot), run_id),
             )
 
     def append_trace(self, run_id: str, event: dict) -> None:
@@ -119,16 +92,7 @@ class RunStore:
         with self._transaction() as db:
             row = db.execute("SELECT status FROM runs WHERE run_id = ?", (run_id,)).fetchone()
             if row is not None and row["status"] == "running":
-                self._write_event(db, run_id, event, _now())
-
-    @staticmethod
-    def _write_event(db: sqlite3.Connection, run_id: str, event: dict, at: str) -> None:
-        seq = db.execute("SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?", (run_id,)).fetchone()[0]
-        payload = {key: value for key, value in event.items() if key in TRACE_FIELDS}
-        if event["type"] == "plan.updated":
-            payload["plan"] = event["plan"]
-        payload.update(run_id=run_id, seq=seq, at=at)
-        db.execute("INSERT INTO events (run_id, seq, payload) VALUES (?, ?, ?)", (run_id, seq, _json(payload)))
+                write_event(db, run_id, event, utc_now())
 
     def finish_run(
         self,
@@ -154,47 +118,17 @@ class RunStore:
         error: str | None,
         error_code: str | None,
     ) -> None:
-        at = _now()
+        at = utc_now()
         run_id = row["run_id"]
-        self._close_open_spans(db, run_id, at, error_code or "SPAN_UNCLOSED", error or "The task ended early.")
+        close_open_spans(db, run_id, at, error_code or "SPAN_UNCLOSED", error or "The task ended early.")
         db.execute(
             "UPDATE runs SET status = ?, finished_at = ?, report = ?, error = ? WHERE run_id = ?",
-            (status, at, _json(report) if report is not None else None, error, run_id),
+            (status, at, encode_json(report) if report is not None else None, error, run_id),
         )
-        event = {**RUN_SPAN, "type": "run.finished", "status": status, "elapsed_ms": _duration(row["started_at"], at)}
+        event = {**RUN_SPAN, "type": "run.finished", "status": status, "elapsed_ms": elapsed_ms(row["started_at"], at)}
         if error is not None:
             event.update(error_code=error_code, error_summary=error)
-        self._write_event(db, run_id, event, at)
-
-    def _close_open_spans(self, db: sqlite3.Connection, run_id: str, at: str, code: str, message: str) -> None:
-        records = db.execute("SELECT payload FROM events WHERE run_id = ? ORDER BY seq DESC", (run_id,)).fetchall()
-        finished = set()
-        for record in records:
-            event = json.loads(record["payload"])
-            kind, phase = event["type"].split(".")
-            if kind not in {"agent", "tool"}:
-                continue
-            key = (kind, event["span_id"])
-            if phase == "finished":
-                finished.add(key)
-            elif key not in finished:
-                self._write_event(
-                    db,
-                    run_id,
-                    {
-                        "type": f"{kind}.finished",
-                        "span_id": event["span_id"],
-                        "parent_span_id": event.get("parent_span_id"),
-                        "agent_id": event.get("agent_id"),
-                        **{name: event[name] for name in ("stage", "tool_name") if name in event},
-                        "status": "failed",
-                        "elapsed_ms": _duration(event["at"], at),
-                        "error_code": code,
-                        "error_summary": message,
-                    },
-                    at,
-                )
-                finished.add(key)
+        write_event(db, run_id, event, at)
 
     def recover_unfinished(self) -> None:
         with self._transaction() as db:

@@ -1,6 +1,6 @@
 # DHub Process Impact Analyser V0
 
-Business 或 Developer 输入拟议变更，网页实时显示调查步骤和计划，完成后呈现结构化影响报告。默认演示使用合成的 Confluence 页面、两个示例仓库和静态调用关系。内网可配置真实资料与兼容的 LLM 网关。
+Business 或 Developer 输入拟议变更，网页实时显示调查步骤和计划，完成后呈现结构化影响报告。默认演示使用合成的 Confluence 页面、示例 Git 仓库和静态调用关系。内网已接通 Confluence 导出和 LLM，项目 PoC 的下一步是复用真实 CodeGraph 并跑通证据链。 [内网交接](docs/intranet-poc-handoff.md)
 
 ## 当前 V0 工作流
 
@@ -12,19 +12,31 @@ Business 或 Developer 输入拟议变更，网页实时显示调查步骤和计
 
 | Agent | 实现 | 模型提示词 | 工具定义 |
 | --- | --- | --- | --- |
-| Main Process Impact Analyser | [dhub/agents/main.py](dhub/agents/main.py) | [共享规划与派单](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md)、[对话](dhub/prompts/main-chat.md) | `investigate_domain`、`investigate_code`、`update_plan` |
-| Domain Knowledge Investigator | [dhub/agents/domain.py](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) | [dhub/tools/domain.py](dhub/tools/domain.py) |
-| Code Investigator | [dhub/agents/code.py](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) | [dhub/tools/code.py](dhub/tools/code.py) |
+| Main Process Impact Analyser | [dhub/agents/main.py](dhub/agents/main.py) | [共享规划与派单](dhub/prompts/main-plan.md)、[影响报告](dhub/prompts/main-report.md)、[对话](dhub/prompts/main-chat.md) | [investigate_domain](dhub/tools/investigate_domain.py) · [investigate_code](dhub/tools/investigate_code.py) · [update_plan](dhub/tools/update_plan.py) |
+| Domain Knowledge Investigator | [dhub/agents/domain.py](dhub/agents/domain.py) | [业务调查](dhub/prompts/domain.md) | [Domain 工具注册](dhub/tools/domain.py) |
+| Code Investigator | [dhub/agents/code.py](dhub/agents/code.py) | [代码调查](dhub/prompts/code.md) | [Code 工具注册](dhub/tools/code.py) |
 
-模型模式将共用指令、决策基线和角色提示词组合后发送给网关。 [共用提示词](dhub/prompts/common.md) · [九个工具的契约](docs/expected-tools.md)
+模型模式将共用指令、决策基线和角色提示词组合后发送给网关。 [共用提示词](dhub/prompts/common.md) · [工具契约](docs/expected-tools.md)
+
+文档搜索可按 FD、页面和版本过滤，按相关性返回有章节 ID 的命中。代码搜索支持字面和标识符变体匹配，按目录、glob 和扩展名限定固定提交中的文件。用 `list_documents` 和 `list_files` 翻查目录，用原文工具登记证据。搜索结果和 Trace 都会说明覆盖与截断。 [搜索状态](docs/expected-tools.md#搜索状态)
+
+Main 用版本化文档了解业务规则和设计意图，用固定 Git 提交中的源码、配置和调用点核实当前实现。发现冲突时，回复会引用两侧来源并说明差异。
 
 ### 修改或新增工具
 
-业务文档工具集中在 [domain.py](dhub/tools/domain.py)，Git 和 CodeGraph 工具集中在 [code.py](dhub/tools/code.py)。每个工具的方法名、参数类型、默认值和 docstring 对应模型看到的名字、参数和描述。
+每个模型工具在 `dhub/tools/<工具名>.py` 中定义，例如 `search_code.py` 或 `read_document.py`。实现的签名、默认值和 docstring 决定模型可见的接口。 [全部工具文件](docs/expected-tools.md#1-tool-overview)
 
-新增工具时，在所属文件实现方法，再把它加入同一文件的 `toolset()`。用 `trace_fields` 选择 Trace 可展示的参数。需要生成报告证据时，用 `evidence_factory` 提取文档页版本、代码行号等定位字段。
+新增资料工具时，在对应文件实现查询和 `TRACE_FIELDS`，再绑定到所属 Investigator 的 `toolset()`。需要生成证据的工具同时提供 `evidence_factory`。通用路径、查询、分页和派单函数放在 [tools/utils/](dhub/tools/utils/)。
 
-数据加载和 Git 底层操作分别在 [documents.py](dhub/documents.py) 和 [repositories.py](dhub/repositories.py)。[sources.py](dhub/sources.py)为每次分析准备快照，[agent_runtime.py](dhub/agent_runtime.py)统一执行工具、登记证据和记录 Trace。
+### 其他源码入口
+
+| 职责 | 目录与文件 |
+| --- | --- |
+| 数据版本、文档、Git 和 CodeGraph | [sources.py](dhub/sources.py) · [documents.py](dhub/documents.py) · [repositories.py](dhub/repositories.py) · [codegraph.py](dhub/codegraph.py) |
+| 模型与 HTTP 调用 | [llm/](dhub/llm/) |
+| 应用和模型配置 | [config/](dhub/config/) · [settings.yaml](dhub/config/settings.yaml) |
+| SQLite、Trace 与回放 | [store/runs.py](dhub/store/runs.py) · [store/events.py](dhub/store/events.py) |
+| 工具执行、证据和预算 | [agent_runtime.py](dhub/agent_runtime.py) |
 
 ## 快速启动
 
@@ -55,7 +67,7 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 
 ## 内网配置
 
-首次配置可从 `.env.example` 创建 `.env`。同名配置以进程环境变量为准。先用 `DHUB_DATA_MODE=demo` 及所选 provider 验证原生工具调用。配置文档导出和仓库后，可将 `DHUB_DATA_MODE` 设为 `project`。项目模式需要模型网关。
+应用读入 [settings.yaml](dhub/config/settings.yaml)。可以设置 `DHUB_CONFIG_FILE` 加载站点 YAML，例如 `data/dhub.yaml`。同名变量由进程环境优先覆盖 `.env`，环境配置优先于站点 YAML 和内置默认值。`.env.example` 列出了可用的覆盖项。内网既有配置沿用当前的模型网关与凭证注入方式。 [项目模式示例](docs/intranet-poc-handoff.md#固定仓库并复用-codegraph)
 
 ### 模型网关
 
@@ -71,20 +83,11 @@ python -m pip download --only-binary=:all: -r requirements.txt -d wheelhouse
 
 所有 `LLM_*` 设置均可用 `DHUB_LLM_*` 覆盖。网关由配置显式选择。模型不可用时可查本机网关的 `/models` 或 `/v1/models`，把目录中的模型名填入 `DHUB_LLM_MODEL`。
 
-两个在线适配器在 [dhub/llm.py](dhub/llm.py) 统一返回 `ChatResult`。Responses 保留工具调用 ID、工具返回和 reasoning 项用于后续轮次，并发送 `store=false`。本机 Responses 直连可用。使用非回环地址时须配置 HTTPS、API key 和 `LLM_ALLOW_NONLOOPBACK=true`。企业 CA 可用 `SSL_CERT_FILE`，Chat Completions 支持 HTTPX 的环境代理。[HTTPX 环境变量](https://www.python-httpx.org/environment_variables/)
+两个在线适配器统一返回 `ChatResult`。Responses 保留工具调用 ID、工具返回和 reasoning 项用于后续轮次，并发送 `store=false`。本机 Responses 直连可用。使用非回环地址时须配置 HTTPS、API key 和 `LLM_ALLOW_NONLOOPBACK=true`。企业 CA 可用 `SSL_CERT_FILE`，Chat Completions 支持 HTTPX 的环境代理。 [Responses](dhub/llm/local_responses.py) · [Chat Completions](dhub/llm/openai_chat.py) · [HTTPX 环境变量](https://www.python-httpx.org/environment_variables/)
 
 ### 导入 Confluence
 
-拉取的入口已经预留在 [dhub/confluence.py](dhub/confluence.py)。内网接入人可实现本地模块函数，使用已批准的 Confluence MCP 客户端，按 Space 和根页面抓取所需内容，并产出结构化页面。下面是对接签名和导出命令。
-
-```python
-from collections.abc import Iterable
-from dhub.confluence import ConfluencePage
-
-def pull_pages(*, space_key: str, root_page_ids: list[str]) -> Iterable[ConfluencePage]:
-    """由内网接入人实现，迭代返回 ConfluencePage。"""
-    raise NotImplementedError
-```
+内网已完成 Confluence 拉取，数据位于 `data/confluence/`。按 manifest 使用现有编码文件名的 Markdown 正文。需要重新导出时，可通过导出命令调用内网已有的 provider。 [已有导出如何接入](docs/intranet-poc-handoff.md#确认现有-confluence-导出可检索) · [导出器](dhub/confluence.py)
 
 ```powershell
 .\.venv\Scripts\python.exe -m dhub.confluence --provider intranet_confluence:pull_pages --space SPACE_KEY --root-page-id ROOT_PAGE_ID --output data/confluence
@@ -106,11 +109,17 @@ Decision Process 的主要实现位于 `decision-engine-instant-decision-svc` �
 
 单仓库配置适用于项目模式。报告按已配置来源和实际可用性说明覆盖范围。Git 搜索和文件读取支持 UTF-8 的 `.sh` 和 `.ps1`。 [代码工具覆盖](docs/expected-tools.md#固定仓库版本与选择调查路径)
 
-CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入。工厂返回满足 [CodeGraphAdapter](dhub/repositories.py) 的对象，接入内网版本的索引查询。`indexed_commit(repo_id)` 返回索引覆盖的提交，`explore(repo_id=..., commit_sha=..., query=...)` 返回可序列化的关系记录数组。后端验证索引与本次提交匹配并提供窗口读取。缺少匹配索引时可以用搜索和带行号的文件阅读继续核实，并在报告中说明覆盖缺口。
+### 复用 CodeGraph 实现
+
+在内网从 MDC Assistant 提取已有 CodeGraph Tools 和底层查询、索引读取实现，作为 DHub 项目的可导入依赖。DHub 适配器直接调用这些实现，并将原生的文本或关系记录转成 DHub 工具结果。
+
+用 `DHUB_CODEGRAPH_ADAPTER=module:factory` 指定项目侧工厂，返回满足 `BoundCodeGraphAdapter` 的对象。`index_info` 提供索引对应的 Git SHA 和索引 ID，`explore` 接收已绑定的索引与截止时间。DHub 核对查询前后的索引身份，保存有界结果，并用同次运行的句柄续读。现有数组型适配器可继续按提交 SHA 查询。 [适配器类型](dhub/codegraph.py) · [工具和返回契约](docs/expected-tools.md#34-codegraph_explore)
+
+内网复用时需要当前版 CodeGraph 工具入口、底层查询及索引读取模块，以及一个固定到 `dev` 提交的 Python 索引。索引不可用时可用 Git 搜索和原文继续调查，由 Main 说明图覆盖缺口。 [验收项](docs/poc-acceptance.md#项目资料上的评估)
 
 ## 内网验证与排查
 
-可用下面的命令运行本地烟测。测试使用演示资料和模拟网关，覆盖离线流程、多轮调查和聊天、调用与时间预算、报告校验、证据链接和运行回放。
+可用下面的命令运行本地测试。测试使用演示资料、临时 Git 仓库和模拟网关，覆盖搜索范围与排序、目录翻页、长行与同名章节原文、部分失败、多轮调查、报告证据和运行回放。
 
 `requirements.txt` 固定 LangGraph `1.0.10`、LangChain Core `1.2.31` 及配套的 checkpoint、prebuilt、SDK 和 LangSmith 版本。本地干净环境已验证依赖解析和安装。内网使用目标镜像安装后，可运行 `python -m pip check` 核对该环境。
 
@@ -124,4 +133,4 @@ CodeGraph 项目适配器通过 `DHUB_CODEGRAPH_ADAPTER=module:factory` 注入�
 - `DHUB_DB_PATH` 默认是 `.local/runs.sqlite3`。其中保存分析需求、证据摘要、报告、Trace 和计划版本。转交内网时复制 `dhub/`、`demo/`、`docs/`、`tests/`、`requirements.txt`、`README.md` 和 `.env.example`。虚拟环境、实际导出、凭证和运行库在目标环境准备。
 - 停止服务用 `Ctrl+C`。将要独立验证的历史请求放入不同数据库文件，便于区分演示和项目运行。
 
-[文档索引与路线图](docs/README.md) · [总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)
+[文档索引与路线图](docs/README.md) · [内网交接](docs/intranet-poc-handoff.md) · [总需求](docs/poc-requirements.md) · [Agent 规格](docs/agent-spec.md) · [API 和 Trace](docs/api-ui-trace.md) · [验收用例](docs/poc-acceptance.md)

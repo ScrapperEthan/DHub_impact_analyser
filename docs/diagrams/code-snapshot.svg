@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="560" height="468" viewBox="0 0 560 468" role="img" aria-labelledby="title desc">
   <title id="title">Git 快照与 CodeGraph 调查路径</title>
-  <desc id="desc">将项目 Git 仓库绑定到一个提交。Git 搜索与读取可直接使用。CodeGraph 需要索引匹配提交，缺失或不匹配时回到 Git 工具。</desc>
+  <desc id="desc">将项目 Git 仓库绑定到一个提交。CodeGraph 校验索引提交与本次运行的索引身份。缺失或变化时用 Git 搜索与读取。</desc>
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
       <path d="M0 0 10 5 0 10 2 5Z" fill="#526A82"/>
@@ -46,15 +46,15 @@
   <g class="node source">
     <rect x="24" y="196" width="248" height="84" rx="13"/>
     <text class="label" x="148" y="222">Git 搜索与原文</text>
-    <text class="tool" x="148" y="246">get_repository_metadata</text>
-    <text class="tool" x="148" y="268">search_code · read_file</text>
+    <text class="tool" x="148" y="246">list_files · search_code</text>
+    <text class="tool" x="148" y="268">read_file</text>
   </g>
   <g class="node code">
     <rect x="288" y="196" width="248" height="84" rx="13"/>
     <text class="label" x="412" y="229">校验 CodeGraph</text>
-    <text class="detail" x="412" y="255">索引提交与调查提交一致？</text>
+    <text class="detail" x="412" y="255">提交与索引身份一致？</text>
   </g>
-  <text class="branch amber" x="234" y="340">缺失或不匹配</text>
+  <text class="branch amber" x="234" y="340">缺失或变化</text>
   <text class="branch" x="445" y="322">匹配</text>
 
   <g class="node code">

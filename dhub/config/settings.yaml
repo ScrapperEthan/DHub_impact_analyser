@@ -1,0 +1,18 @@
+# Built-in defaults. Set DHUB_CONFIG_FILE for site-specific YAML overrides.
+# Project paths are relative to the DHub checkout, or absolute.
+data_mode: demo
+db_path: .local/runs.sqlite3
+run_timeout: 300
+confluence_manifest: null   # Project example: data/confluence/manifest.json
+repositories_file: null     # Project example: data/repositories.json
+codegraph_adapter: null     # Project example: intranet_codegraph:create_adapter
+
+llm:
+  provider: null            # Defaults to offline for demo, openai_chat for project
+  base_url: null
+  model: null
+  timeout: 40
+  max_tokens: null
+  reasoning_effort: null
+  allow_nonloopback: false
+  # Supply credentials through DHUB_LLM_API_KEY or LLM_API_KEY.

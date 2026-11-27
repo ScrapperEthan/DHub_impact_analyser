@@ -45,10 +45,12 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 
 | 来源类型 | 定位字段 |
 | --- | --- |
-| `confluence` | `page_id`、`version`、`title`、`section` 或带定位的附件引用、`feature_drop`、`source_url`（可用时） |
-| `code` | `repo_id`、`branch`（可空）、`commit_sha`、`path`、`start_line`、`end_line`，以及可用的 `symbol` 或提交级 URL。配置和测试采用相同定位 |
+| `confluence` | `page_id`、`version`、`title`、`section_id`、起止行号、章节内字符偏移、`feature_drop`、`source_url`（可用时） |
+| `code` | `repo_id`、`branch`（可空）、`commit_sha`、`path`、`start_line`、`end_line`、`column_offset`、`end_column_offset`。配置和测试采用相同定位 |
 
 后端检查证据 ID、读取来源和快照一致性，并保留足够上下文供人核对。前端在链接不可用时仍展示可复制的版本、章节或行号定位。
+
+原文工具与证据条目使用同一读取窗口。有脱敏时使用等长掩码并标记 `redacted`。代码证据字段中的字符偏移从 0 开始，终点为开区间。Main 收到的证据预览另以 `excerpt_truncated` 标记。
 
 ## Trace 事件
 
@@ -59,9 +61,9 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
 | `run_id`、`seq`、`at` | 分析事件附有运行 ID、连续递增序号及 ISO 8601 时间 |
 | `type` | `run.started`、`run.finished`、`agent.started`、`agent.finished`、`tool.started`、`tool.finished`、`plan.updated` 或聊天终态 |
 | `span_id`、`parent_span_id`、`agent_id` | 关联同一事件对和调用层级。Run 是根。`agent_id` 为 `main`、`domain`、`code`，Run 事件可为空 |
-| `status`、`elapsed_ms` | 开始时为 `running`。结束时记录实际结果和耗时。工具结束可为 `succeeded`、`failed`、`timeout` |
+| `status`、`elapsed_ms` | 开始时为 `running`。结束时记录实际结果和耗时。工具结束可为 `succeeded`、`partial`、`failed` 或 `timeout` |
 | `stage` 或 `tool_name` | Agent 任务摘要或实际工具名。重复调用各有自己的 `span_id` |
-| `input_summary`、`output_summary`、`error_code`、`error_summary` | 白名单参数摘要、命中数或结果摘要，以及错误代码和可读说明。零命中为成功结果，资料缺失和超时通过错误字段区分 |
+| `input_summary`、`output_summary`、`error_code`、`error_summary` | 白名单参数、结果及错误摘要。搜索摘要有实际范围、返回数、截断状态、`has_more` 和可用性警告。来源全部不可用时，工具 Trace 为 `failed`，搜索摘要为 `unavailable` |
 
 工具结束事件示例为合成数据。
 
@@ -78,11 +80,13 @@ FastAPI 接收需求并运行 LangGraph。单进程后台执行分析，SQLite �
   "status": "succeeded",
   "elapsed_ms": 24,
   "input_summary": {"page_id": "DEMO-FD2", "version": "1", "section": "Phase 5 / Step 18"},
-  "output_summary": {"sections_read": 1, "evidence_ids": ["E1"]}
+  "output_summary": {"section_id": "sec-5", "start_line": 5, "end_line": 9, "truncated": false, "next_offset": null, "evidence_ids": ["E1"]}
 }
 ```
 
 Trace 的可见内容限于执行事实和获准展示的业务摘要。服务端在保存事件前过滤凭证、敏感参数和长原文，前端按文本安全显示。工具尚在运行时可看到开始事件，工具失败时同一行显示失败原因。前端按 `seq` 去重并用 `span_id` 合并开始和结束事件。
+
+CodeGraph 查询与续读用 `result_ref` 关联 Trace。Trace 记录来源名称、返回量、捕获量、续读状态、截断和警告数量。原始查询、图正文、provider 警告文本和可续读的 `result_id` 留在调查工具调用中。`retrieval_coverage` 将实际搜索和图状态传给 Main。
 
 ## 调查计划事件
 

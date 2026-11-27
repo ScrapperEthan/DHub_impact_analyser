@@ -53,7 +53,7 @@ Main 从工具结果读取最新版本。对于仍有待调查事项的终稿，
 
 - `rules[]` 包含业务规则、适用范围、例外、涉及的 Phase 和 Step、文档状态及 `evidence_ids`。文档状态可为 `documented`、`proposed`、`superseded` 或 `unknown`。
 - `conflicts[]` 包含相关规则或提案、重叠范围、差异和证据。
-- `code_hints[]` 给出业务术语、可能的代码命名、配置键或测试场景，供下一步搜索。
+- `code_hints` 提供 `business_terms`、`possible_identifiers`、`config_keys`、`suspected_modules` 和来源 `evidence_ids`。候选命名由 Code 在固定提交中验证。
 - `coverage` 和 `open_questions[]` 记录调查看过的 FD 或页面、资料缺口及需代码验证的问题。
 
 ### 知识准备与检索
@@ -62,13 +62,13 @@ Main 从工具结果读取最新版本。对于仍有待调查事项的终稿，
 
 文档目录保留标题、Page ID、版本、源 URL、更新时间、更新人（如获准提供）、Ancestors、Feature Drop、章节路径、页面链接和附件元数据。Feature Drop 可由层级派生，主题和摘要可少量人工添加。解析时尽量保留标题层级、表头、接受标准与条件分支。用小节做检索单位，按需读取相邻章节、整页和可用附件。目录摘要和命中片段用于导航，报告证据定位到原文。
 
-V0 在内存中逐节计算关键词分数，依据正文词频、完整查询匹配及标题、章节和元数据关键词排序。BM25 或 FTS 与章节向量融合是 V1 候选，沿用 `search_documents` 的结果格式。 [当前打分与工具契约](expected-tools.md#22-search_documents) · [V1 检索方案](expected-tools.md#25-v1-候选--hybrid-rag)
+V0 加载快照时预计算各章节的规范化正文和关键词。检索时根据完整短语、标题与查询词覆盖排序。BM25 或 FTS 与章节向量融合是 V1 候选，沿用 `search_documents` 的结果格式。 [当前打分与工具契约](expected-tools.md#22-search_documents) · [V1 检索方案](expected-tools.md#25-v1-候选--hybrid-rag)
 
 | 工具 | V0 输入及返回 |
 | --- | --- |
-| `search_documents` | `query`、可选 FD / Ancestor 过滤、`limit`。返回 Page ID、版本、标题、章节、片段和匹配方式。V0 默认关键词模式 |
-| `read_document` | `page_id`、`version`、可选章节。返回原文和元数据，必要时提供阅读窗口和后续位置 |
-| `list_documents` | 可按 FD 或 Ancestor 浏览。返回有界的目录记录 |
+| `search_documents` | 按关键词搜索，可过滤 FD、Ancestor、页 ID 和版本。返回章节 ID、行号、片段和覆盖状态 |
+| `read_document` | 用页 ID、版本和章节 ID 读取原文，支持按字符偏移续读 |
+| `list_documents` | 可按 FD 或 Ancestor 浏览，按 `next_offset` 遍历目录 |
 | `get_document_metadata` | 以 Page ID 和版本返回元数据。若 `read_document` 已返回完整元数据，本次可省略调用 |
 
 沿链接和同级页面探索可先复用目录元数据与上述工具。引用的附件未导入时要记录这个缺口，避免把只读到的页面视为附件内容已核实。
@@ -93,18 +93,21 @@ V0 在内存中逐节计算关键词分数，依据正文词频、完整查询�
 
 ### MDC Assistant 工具复用
 
-优先迁移已有四个接口，以适配层加上仓库选择、版本和 Trace。工具名称来自现有讨论，真实接口和返回值在集成时核对。
+复用 MDC Assistant 的 CodeGraph 工具实现和底层查询、索引读取模块，由 DHub 适配层补上固定提交、索引身份、分页和 Trace。实际模块边界与返回值按内网源码核对。
 
 | 工具 | V0 输入及返回 |
 | --- | --- |
 | `get_repository_metadata` | 以 `repo_id` 取得仓库身份、分支、commit SHA 和可用索引对应的提交。可由本地 Git 或仓库适配器提供 |
-| `search_code` | 查询、`repo_ids` 和可选路径或扩展名过滤，返回 `repo + path:line:text`。配置和测试优先复用此入口 |
-| `read_file` | 指定仓库、相对路径和行号窗口，读取绑定提交的带行号源码或配置 |
-| `codegraph_explore` | 指定仓库和调查目标，返回相关源码或静态关系，以及可继续读取的 `result_id` |
-| `codegraph_read_result` | 指定当前运行的 `result_id` 与窗口，只读取已捕获结果，沿用原结果的仓库和提交 |
+| `search_code` | 字面或标识符变体搜索。按仓库、路径前缀、glob 和扩展名过滤，返回命中词、原文位置及搜索状态 |
+| `list_files` | 按目录和 glob 浏览固定提交的可读文件名，使用 `next_offset` 翻页 |
+| `read_file` | 指定仓库、相对路径、行号和字符偏移，读取固定提交中的原文，支持长行续读 |
+| `codegraph_explore` | 指定仓库和调查目标，返回文字或关系线索、索引身份、覆盖状态及续读句柄 |
+| `codegraph_read_result` | 按 `result_id` 和 `next_offset` 读取同次运行捕获的内容，继承原索引和截断状态 |
 
 在同一运行中锁定仓库提交与知识快照。CodeGraph 不可用或索引提交不匹配时，转用搜索和源文件核对并标明图覆盖缺失。工具只能访问已配置的语料和仓库，服务端负责校验路径、返回限制和超时。Demo 模式使用合成资料上的工具执行；项目模式依据实际接入情况报告。
 
 ## 调查和证据的关系
 
 在线分析时建立一次运行内的业务到技术关联并保存在报告中。`read_document` 和 `read_file` 的原文证据带有本次运行的证据 ID 和工具调用 ID。比如文档定义豁免条件，代码读取确认配置和分支，测试阅读确认已有断言，从而支持主 Agent 解释为什么直改共享函数可能影响 Inbound。当前报告校验会剔除未知引用、降级缺证的已确认结论。结论是否得到引用原文支持仍需核对。 [报告与 Trace 契约](api-ui-trace.md) · [报告校验源码](../dhub/report.py)
+
+Main 用文档确认规则描述和设计意图。文档可能过期，当前实现以实际核对的固定提交源码、配置和调用条件为准。发现冲突时引用双方来源并说明差异。摘要缺少关键条件时，Main 派发定向补读，再决定结论是否可以确认。

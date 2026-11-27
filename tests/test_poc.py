@@ -433,12 +433,38 @@ class AdaptivePlanningTest(unittest.TestCase):
 
 
 class LocalResponsesTest(unittest.TestCase):
+    def test_project_yaml_with_model_environment_overrides(self):
+        with TemporaryDirectory() as directory:
+            settings_file = Path(directory) / "settings.yaml"
+            settings_file.write_text(
+                "data_mode: project\n"
+                "confluence_manifest: data/confluence/manifest\n"
+                "run_timeout: 90\n"
+                "llm:\n"
+                "  provider: local_responses\n"
+                "  model: yaml-model\n"
+                "  timeout: 27\n",
+                encoding="utf-8",
+            )
+            environment = {"DHUB_CONFIG_FILE": str(settings_file)}
+            with patch("dhub.config.settings.os", SimpleNamespace(environ=environment)), patch("dhub.config.settings.load_dotenv"):
+                settings = Settings.from_env()
+                self.assertEqual(settings.data_mode, "project")
+                self.assertEqual(settings.manifest_path.parts[-3:], ("data", "confluence", "manifest"))
+                self.assertEqual((settings.run_timeout, settings.llm.timeout), (90, 27))
+                self.assertEqual((settings.llm.provider, settings.llm.model), ("local_responses", "yaml-model"))
+                environment["LLM_MODEL"] = "shared-model"
+                self.assertEqual(Settings.from_env().llm.model, "shared-model")
+                environment.update(DHUB_LLM_MODEL="dhub-model", DHUB_RUN_TIMEOUT="60")
+                overridden = Settings.from_env()
+                self.assertEqual((overridden.llm.model, overridden.run_timeout), ("dhub-model", 60))
+
     def test_dhub_model_override_and_endpoint_configuration(self):
         environment = {
             "LLM_PROVIDER": "local_responses", "LLM_MODEL": "shared-model", "DHUB_LLM_MODEL": "dhub-model",
             "LLM_MAX_TOKENS": "400", "DHUB_LLM_MAX_TOKENS": "500", "LLM_REASONING_EFFORT": "low",
         }
-        with patch("dhub.config.os", SimpleNamespace(environ=environment)), patch("dhub.config.load_dotenv"):
+        with patch("dhub.config.settings.os", SimpleNamespace(environ=environment)), patch("dhub.config.settings.load_dotenv"):
             config = Settings.from_env().llm
         self.assertEqual((config.model, config.max_tokens, config.reasoning_effort), ("dhub-model", 500, "low"))
         self.assertEqual(str(LocalResponses(config).endpoint), "http://127.0.0.1:4141/v1/responses")

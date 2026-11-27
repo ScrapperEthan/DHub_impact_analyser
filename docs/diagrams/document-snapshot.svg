@@ -55,7 +55,7 @@
     <rect x="293" y="278" width="243" height="119" rx="13"/>
     <text class="label" x="414.5" y="307">取得证据</text>
     <text class="tool" x="414.5" y="334">read_document</text>
-    <text class="detail" x="414.5" y="358">读取指定页版本的原文</text>
+    <text class="detail" x="414.5" y="358">按页版本与章节 ID 读取</text>
     <text class="detail" x="414.5" y="382">登记 Evidence ID</text>
   </g>
 </svg>

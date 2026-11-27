@@ -63,7 +63,7 @@ Chatbot 和 Analyser 共用规划工具。遇到简单问题，Main 可以直接
 ### Step 2 — Investigate Domain Knowledge（Domain）
 
 1. 从业务任务提取术语、别名、配置名和候选 Step。
-2. 通过目录和检索找到 Confluence 候选章节；打开原文核对适用条件、表格、例外和上下文。
+2. 按 FD 或层级翻阅目录，检索关键词和短语。根据命中量和覆盖状态调整查询，用页版本和章节 ID 读原文核对适用条件、表格、例外和上下文。
 3. 核对相关后续 FD、链接页面与冲突描述；区分 documented、proposed、superseded、unknown。FD 序号、页版本和实际部署状态是不同概念。
 4. 返回 Domain Findings：规则、冲突、适用范围、Phase/Step、原文证据、Code Hints 和待代码确认的问题。
 
@@ -84,10 +84,10 @@ V0 由 Main 在派单的 `question` 中描述待验证问题。Code Investigator
 ### Step 4 — Investigate Code（Code）
 
 1. 核对仓库版本与索引可用性，定位候选实现。
-2. 用 CodeGraph 和字面搜索查找符号、caller/callee、调用链与共享实现；按需翻页。
-3. 读取真实带行号源码，确认条件分支、参数、配置读取、默认值及调用侧差异。
+2. 用文件名和字面或标识符变体搜索定位候选，用 CodeGraph 查符号关系、调用链与共享实现。遇到范围过宽或覆盖不全时调整搜索。
+3. 按固定提交及行号读取源码，长行可指定字符偏移。确认条件分支、参数、配置读取、默认值及调用侧差异。
 4. 查阅已有测试断言和下游消费者；跨仓库依赖必须有源码、接口契约或配置证据，不能靠同名函数推断。
-5. 返回 Code Findings，包括实现、依赖、配置、现有测试、证据和技术限制。
+5. 返回 Code Findings，包括实现、依赖、配置、现有测试、证据和技术限制。运行时把搜索和图查询的实际覆盖状态一并传给 Main。
 
 读取现有测试不等于执行测试。代码提交中的行为也不等于生产部署行为。
 
@@ -118,7 +118,7 @@ Main 应区分：
 
 - 业务适用范围、后续 FD、例外条件不清楚 → 交 Domain 补查。
 - 实现分支、共享调用、配置或测试不清楚 → 交 Code 补查。
-- 补查任务携带明确问题、之前的发现及相关证据，避免重复无目标的搜索。
+- 补查任务携带明确问题、之前的发现及相关证据。调查员也能看到本次运行最近 8 次自己的搜索及其状态，据此选择补查范围。
 - 调查结果追加到现有发现，再由 Main 综合。预算耗尽或资料不可访问时，保留有证据的结论并说明限制。
 
 每次 Investigator 受派最多执行 8 次资料工具调用，单次运行合计最多 50 次。主 Agent 派单独立计数，最多 50 次。从准备快照起计算的运行时限最高 300 秒。
@@ -188,7 +188,7 @@ Domain / Code 的每条事实应携带 evidence_ids。Graph State 或单次运�
 
 `analyzer` 先由 `Sources` 绑定快照，再调用主 Agent。在线聊天和分析都进入 `MainProcessImpactAnalyser._run_online` 的 `main` 和 `delegate` 节点。 [analyzer.py](../dhub/analyzer.py) · [main.py](../dhub/agents/main.py)
 
-项目模式按已配置来源判断覆盖。Decision Process 调查优先使用 `decision-engine-instant-decision-svc` 的 `dev` 分支快照。缺少已配置来源或匹配的索引时，报告说明缺口。 [analyzer.py](../dhub/analyzer.py) · [配置解析](../dhub/config.py)
+项目模式按已配置来源判断覆盖。Decision Process 调查优先使用 `decision-engine-instant-decision-svc` 的 `dev` 分支快照。缺少已配置来源或匹配的索引时，报告说明缺口。 [analyzer.py](../dhub/analyzer.py) · [配置解析](../dhub/config/settings.py)
 
 | 环节 | V0 节点或函数 | 实际交接 |
 | --- | --- | --- |
